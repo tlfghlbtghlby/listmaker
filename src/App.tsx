@@ -31,12 +31,14 @@ const MainContent: React.FC = () => {
   // Product modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [initialBarcodeForNewProduct, setInitialBarcodeForNewProduct] = useState<string | undefined>(undefined);
 
   // Invoice print modal
   const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
 
-  const handleOpenNewProduct = () => {
+  const handleOpenNewProduct = (initialBarcode?: string) => {
     setProductToEdit(null);
+    setInitialBarcodeForNewProduct(initialBarcode);
     setIsProductModalOpen(true);
   };
 
@@ -223,9 +225,11 @@ const MainContent: React.FC = () => {
       <ProductModal
         isOpen={isProductModalOpen}
         productToEdit={productToEdit}
+        initialCode={initialBarcodeForNewProduct}
         onClose={() => {
           setIsProductModalOpen(false);
           setProductToEdit(null);
+          setInitialBarcodeForNewProduct(undefined);
         }}
       />
 

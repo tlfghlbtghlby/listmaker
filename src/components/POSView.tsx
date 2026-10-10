@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { Product, SaleType, PriceType, InvoiceItem, Invoice } from '../types';
 import { 
@@ -19,17 +19,54 @@ import {
   Printer, 
   Settings,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Scan,
+  UserPlus,
+  X
 } from 'lucide-react';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface POSViewProps {
   onInvoiceCreated: (invoice: Invoice) => void;
-  onOpenNewProduct: () => void;
+  onOpenNewProduct: (initialBarcode?: string) => void;
   onOpenSettings?: () => void;
 }
 
+// Scanner Audio Feedback using Web Audio API
+const playScannerBeep = (type: 'success' | 'alert' = 'success') => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    if (type === 'success') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1700, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.09);
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(450, ctx.currentTime);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    }
+  } catch (e) {
+    // Autoplay policy or unsupported
+  }
+};
+
 export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewProduct, onOpenSettings }) => {
-  const { products, customers, createInvoice, updateSettings, formatMoney, settings } = useApp();
+  const { products, customers, createInvoice, updateSettings, formatMoney, settings, addCustomer } = useApp();
 
   // POS State
   const [saleType, setSaleType] = useState<SaleType>('direct');
@@ -46,6 +83,19 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const [customCustomerName, setCustomCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
   
+  // Quick Add Customer Modal State
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [quickCustomerName, setQuickCustomerName] = useState('');
+  const [quickCustomerPhone, setQuickCustomerPhone] = useState('');
+  const [quickCustomerAddress, setQuickCustomerAddress] = useState('');
+  const [quickCustomerInitialDebt, setQuickCustomerInitialDebt] = useState<number | ''>('');
+  const [quickCustomerError, setQuickCustomerError] = useState('');
+
+  // Barcode scanner & instant feedback
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [unfoundBarcodePrompt, setUnfoundBarcodePrompt] = useState<string | null>(null);
+
   // Financial modifiers
   const [discount, setDiscount] = useState<number>(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
@@ -97,41 +147,151 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     }
   };
 
-  // Add product to cart with chosen price type
-  const addToCartWithPrice = (product: Product, priceType: PriceType) => {
-    const existingIndex = cartItems.findIndex((item) => item.productId === product.id);
-    const unitPrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
+  const handleOpenQuickAddCustomer = (presetName?: string) => {
+    setQuickCustomerName(presetName ?? (customCustomerName.trim() || ''));
+    setQuickCustomerPhone(customerPhone.trim() || '');
+    setQuickCustomerAddress('');
+    setQuickCustomerInitialDebt('');
+    setQuickCustomerError('');
+    setShowQuickAddModal(true);
+  };
 
-    if (existingIndex > -1) {
-      const updated = [...cartItems];
-      const newQty = updated[existingIndex].quantity + 1;
-      updated[existingIndex] = {
-        ...updated[existingIndex],
-        priceType: priceType,
-        unitPrice: unitPrice,
-        quantity: newQty,
-        total: newQty * unitPrice,
-      };
-      setCartItems(updated);
+  const handleSaveQuickCustomer = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = quickCustomerName.trim();
+    if (!cleanName) {
+      setQuickCustomerError('يرجى إدخال اسم الزبون');
+      return;
+    }
+
+    const created = addCustomer({
+      name: cleanName,
+      phone: quickCustomerPhone.trim(),
+      address: quickCustomerAddress.trim(),
+      initialDebt: typeof quickCustomerInitialDebt === 'number' ? quickCustomerInitialDebt : 0,
+    });
+
+    setSelectedCustomerId(created.id);
+    setCustomCustomerName(created.name);
+    setCustomerPhone(created.phone);
+    setShowQuickAddModal(false);
+    setScanNotice(`تمت إضافة واعتماد الزبون "${created.name}" في النظام بنجاح`);
+    setTimeout(() => setScanNotice(null), 4000);
+  };
+
+  // Add product to cart with chosen price type - Increment quantity atomically if already in list
+  const addToCartWithPrice = (product: Product, priceType: PriceType, delta = 1) => {
+    setCartItems((prev) => {
+      const existingIndex = prev.findIndex((item) => item.productId === product.id);
+      const unitPrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
+
+      if (existingIndex > -1) {
+        // مادة موجودة بالقائمة: يزداد عددها فقط دون تكرار
+        return prev.map((item, idx) => {
+          if (idx === existingIndex) {
+            const newQty = item.quantity + delta;
+            return {
+              ...item,
+              quantity: newQty,
+              total: newQty * item.unitPrice,
+            };
+          }
+          return item;
+        });
+      } else {
+        // مادة جديدة: تضاف إلى القائمة
+        const newItem: InvoiceItem = {
+          productId: product.id,
+          productName: product.name,
+          code: product.code,
+          unit: product.unit,
+          priceType: priceType,
+          costPrice: product.costPrice,
+          unitPrice: unitPrice,
+          quantity: delta,
+          total: delta * unitPrice,
+        };
+        return [...prev, newItem];
+      }
+    });
+  };
+
+  const addToCart = (product: Product, delta = 1) => {
+    addToCartWithPrice(product, globalPriceType, delta);
+  };
+
+  // Handle Barcode Scanned via Hardware Scanner Gun, Camera or Search Bar
+  const handleBarcodeScanned = (scannedCode: string) => {
+    const clean = scannedCode.trim();
+    if (!clean) return;
+
+    // Match exact code or case-insensitive code
+    const matched = products.find((p) => p.code.toLowerCase() === clean.toLowerCase())
+      || products.find((p) => p.code === clean);
+
+    if (matched) {
+      playScannerBeep('success');
+      // يزداد عددها فقط إذا كانت موجودة بالقائمة، أو تضاف إذا كانت غير موجودة
+      addToCartWithPrice(matched, globalPriceType, 1);
+      setSearchQuery('');
+      setUnfoundBarcodePrompt(null);
+      setScanNotice(`تم مسح الباركود #${clean}: زيادة كمية "${matched.name}" في القائمة (+1)`);
+      setTimeout(() => setScanNotice(null), 3000);
     } else {
-      const newItem: InvoiceItem = {
-        productId: product.id,
-        productName: product.name,
-        code: product.code,
-        unit: product.unit,
-        priceType: priceType,
-        costPrice: product.costPrice,
-        unitPrice: unitPrice,
-        quantity: 1,
-        total: unitPrice,
-      };
-      setCartItems((prev) => [...prev, newItem]);
+      playScannerBeep('alert');
+      setSearchQuery('');
+      setUnfoundBarcodePrompt(clean);
+      setScanNotice(`الرمز الشريطي #${clean} غير مسجل في المخزن`);
+      setTimeout(() => setScanNotice(null), 5000);
     }
   };
 
-  const addToCart = (product: Product) => {
-    addToCartWithPrice(product, globalPriceType);
-  };
+  const handleBarcodeScannedRef = useRef(handleBarcodeScanned);
+  useEffect(() => {
+    handleBarcodeScannedRef.current = handleBarcodeScanned;
+  });
+
+  // Global Hardware Barcode Reader Listener (Laser / USB / Bluetooth Scanner Guns)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if any modal is currently open
+      if (showQuickAddModal || isScannerOpen || !!unfoundBarcodePrompt) return;
+
+      const target = e.target as HTMLElement;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      const now = Date.now();
+      const diff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 2) {
+          e.preventDefault();
+          const scanned = buffer.trim();
+          buffer = '';
+          handleBarcodeScannedRef.current(scanned);
+        }
+        return;
+      }
+
+      // Barcode scanners transmit characters in rapid bursts (< 80ms between keystrokes)
+      if (e.key.length === 1) {
+        if (diff > 120 && buffer.length > 0) {
+          buffer = '';
+        }
+        // If not typing in an input, or if keystrokes arrive with scanner speed (< 50ms)
+        if (!isInput || diff < 50) {
+          buffer += e.key;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showQuickAddModal, isScannerOpen, unfoundBarcodePrompt]);
 
   // Update Item Quantity
   const updateQuantity = (productId: string, newQty: number) => {
@@ -229,16 +389,53 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       return;
     }
 
-    if (saleType === 'credit' && !customCustomerName.trim()) {
-      alert('في حالة البيع الآجل، يجب تحديد أو إدخال اسم العميل لتسجيل الحساب عليه!');
-      return;
+    let finalCustomerId: string | undefined = selectedCustomerId || undefined;
+    let finalCustomerName = customCustomerName.trim();
+    let finalCustomerPhone = customerPhone.trim();
+
+    // Check Credit Sale Rule: Only pre-registered customers allowed
+    if (saleType === 'credit') {
+      let activeCustomer = selectedCustomer;
+
+      // If no customer is currently selected by ID, attempt matching by typed name
+      if (!activeCustomer && finalCustomerName) {
+        const found = customers.find(
+          (c) => c.name.trim().toLowerCase() === finalCustomerName.toLowerCase()
+        );
+        if (found) {
+          activeCustomer = found;
+          finalCustomerId = found.id;
+          setSelectedCustomerId(found.id);
+        }
+      }
+
+      // If still not a registered customer, block credit sale and propose adding him
+      if (!activeCustomer || !finalCustomerId) {
+        alert(
+          'لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام لضمان حفظ الديون ومتابعتها!\nيرجى اختيار زبون قديم من القائمة، أو استخدام خيار "اقتراح إضافة زبون جديد".'
+        );
+        handleOpenQuickAddCustomer(finalCustomerName || undefined);
+        return;
+      }
+
+      finalCustomerId = activeCustomer.id;
+      finalCustomerName = activeCustomer.name;
+      finalCustomerPhone = activeCustomer.phone || finalCustomerPhone;
+    } else {
+      // Direct Cash Sale
+      if (!finalCustomerName) {
+        finalCustomerName = selectedCustomer?.name || 'زبون نقدي مباشر';
+      }
+      if (!finalCustomerPhone && selectedCustomer) {
+        finalCustomerPhone = selectedCustomer.phone || '';
+      }
     }
 
     const created = createInvoice({
       type: saleType,
-      customerId: selectedCustomerId || undefined,
-      customerName: customCustomerName.trim() || (saleType === 'direct' ? 'زبون نقدي مباشر' : 'عميل غير مسجل'),
-      customerPhone: customerPhone.trim(),
+      customerId: finalCustomerId,
+      customerName: finalCustomerName,
+      customerPhone: finalCustomerPhone,
       items: cartItems,
       discount: discount,
       paidAmount: actualPaidAmount,
@@ -318,7 +515,13 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="ابحث باسم المادة أو الباركود أو الرمز..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && searchQuery.trim()) {
+                        e.preventDefault();
+                        handleBarcodeScanned(searchQuery.trim());
+                      }
+                    }}
+                    placeholder="ابحث باسم المادة أو امسح الباركود بجهاز القارئ..."
                     className="w-full pl-3 pr-10 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-50/50"
                   />
                   {searchQuery && (
@@ -334,7 +537,17 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
                 <button
                   type="button"
-                  onClick={onOpenNewProduct}
+                  onClick={() => setIsScannerOpen(true)}
+                  className="px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
+                  title="مسح باركود المادة بالكاميرا لإضافتها للسلة فوراً"
+                >
+                  <Scan className="w-4 h-4" />
+                  <span className="hidden sm:inline">مسح باركود</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenNewProduct()}
                   className="px-3 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
                   title="إضافة مادة جديدة للمخزن مباشرة دون مغادرة الشاشة"
                 >
@@ -342,6 +555,23 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                   <span className="hidden sm:inline">مادة جديدة</span>
                 </button>
               </div>
+
+              {/* Scan Feedback Banner */}
+              {scanNotice && (
+                <div className="bg-emerald-50 border border-emerald-300 text-emerald-950 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{scanNotice}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setScanNotice(null)}
+                    className="text-slate-400 hover:text-slate-700 font-bold px-1"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
 
               {/* Category Tabs */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
@@ -618,63 +848,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             )}
 
-            {/* Customer Details Box */}
-            <div className="pt-2 border-t border-slate-200/80 flex flex-col gap-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-700 flex items-center gap-1">
-                  <UserCheck className="w-3.5 h-3.5 text-slate-500" />
-                  بيانات الزبون:
-                </span>
-                {customers.length > 0 && (
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => handleSelectCustomer(e.target.value)}
-                    className="text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  >
-                    <option value="">-- اختر من قائمة الزبائن --</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.totalDebt > 0 ? `(عليه دين: ${formatMoney(c.totalDebt)})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  placeholder={saleType === 'direct' ? 'اسم الزبون (اختياري)' : 'اسم الزبون (مطلوب للآجل)'}
-                  value={customCustomerName}
-                  onChange={(e) => setCustomCustomerName(e.target.value)}
-                  className={`text-xs border rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 ${
-                    saleType === 'credit' && !customCustomerName
-                      ? 'border-amber-400 focus:ring-amber-500 bg-amber-50/30'
-                      : 'border-slate-300 focus:ring-emerald-500'
-                  }`}
-                />
-                <input
-                  type="text"
-                  placeholder="رقم الهاتف (اختياري)"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              {/* Show Previous Debt notification if customer has existing debt */}
-              {selectedCustomer && selectedCustomer.totalDebt > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs flex items-center justify-between text-amber-800">
-                  <span>الدين السابق المستحق على هذا الزبون:</span>
-                  <span className="font-extrabold text-amber-900">{formatMoney(selectedCustomer.totalDebt)}</span>
-                </div>
-              )}
-            </div>
-
           </div>
 
           {/* Cart Items Table */}
-          <div className="flex-1 overflow-y-auto p-3 max-h-[300px]">
+          <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[380px]">
             {cartItems.length === 0 ? (
               <div className="h-44 flex flex-col items-center justify-center text-slate-400 text-center">
                 <ShoppingCart className="w-10 h-10 mb-2 stroke-1 text-slate-300" />
@@ -819,51 +996,191 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             </div>
 
-            {/* Credit Sale Specific Inputs: Downpayment & Remaining */}
-            {saleType === 'credit' && (
-              <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-amber-900">المبلغ المسدد نقداً الآن:</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min="0"
-                      max={finalTotal}
-                      value={paidAmount || ''}
-                      placeholder="0"
-                      onChange={(e) => setPaidAmount(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-28 text-left px-2 py-1 text-xs font-bold border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                    <span className="text-amber-800 font-semibold">{settings.currency}</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200/60">
-                  <span>المبلغ الآجل المتبقي بالدين:</span>
-                  <span className="text-rose-700">{formatMoney(remainingDebt)}</span>
-                </div>
-
-                {selectedCustomer && (
-                  <div className="flex justify-between text-[11px] text-slate-700">
-                    <span>إجمالي دين الزبون الجديد بعد هذه القائمة:</span>
-                    <span className="font-extrabold text-slate-900">{formatMoney(newCustomerDebt)}</span>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-slate-600 flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-amber-700" />
-                    تاريخ استحقاق السداد:
+            {/* Customer Box (منقول بالكامل للأسفل كما هو مطلوب) */}
+            <div className={`p-3 rounded-2xl border flex flex-col gap-2.5 transition ${
+              saleType === 'credit'
+                ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
+                : 'bg-slate-100/80 border-slate-200'
+            }`}>
+              {/* Header: Label + Suggest/Add Customer Button */}
+              <div className="flex items-center justify-between text-xs">
+                <span className={`font-bold flex items-center gap-1.5 ${
+                  saleType === 'credit' ? 'text-amber-950 font-black' : 'text-slate-800'
+                }`}>
+                  <UserCheck className={`w-4 h-4 ${saleType === 'credit' ? 'text-amber-700' : 'text-slate-600'}`} />
+                  <span>
+                    {saleType === 'credit' ? 'اختيار زبون آجل (مسجل مسبقاً):' : 'بيانات الزبون:'}
                   </span>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="text-xs px-2 py-0.5 border border-slate-300 rounded bg-white text-slate-700"
-                  />
-                </div>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-2xs ${
+                    saleType === 'credit'
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                      : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300'
+                  }`}
+                  title="إضافة واقتراح زبون جديد للنظام للتمكن من البيع بالآجل"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ اقتراح إضافة زبون</span>
+                </button>
               </div>
-            )}
+
+              {/* Main Selector: Registered Customers */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                  {saleType === 'credit' ? (
+                    <span className="text-amber-900">
+                      قائمة الزبائن المسجلين مسبقاً <span className="text-rose-600 font-extrabold">* (إلزامي للآجل)</span>:
+                    </span>
+                  ) : (
+                    <span>اختر زبون قديم مسجل مسبقاً (اختياري):</span>
+                  )}
+                </label>
+
+                <select
+                  value={selectedCustomerId}
+                  onChange={(e) => handleSelectCustomer(e.target.value)}
+                  className={`w-full text-xs bg-white border rounded-lg px-2.5 py-2 font-bold focus:outline-none focus:ring-2 ${
+                    saleType === 'credit'
+                      ? selectedCustomerId
+                        ? 'border-emerald-500 text-emerald-950 bg-emerald-50/20'
+                        : 'border-amber-400 text-amber-950 ring-1 ring-amber-300'
+                      : 'border-slate-300 text-slate-800 focus:ring-emerald-500'
+                  }`}
+                >
+                  <option value="">
+                    {saleType === 'credit'
+                      ? '-- اضغط هنا لاختيار الزبون المسجل مسبقاً (إلزامي) --'
+                      : '-- زبون نقدي مباشر (بدون اختيار زبون مسجل) --'}
+                  </option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ''} {c.totalDebt > 0 ? `· عليه دين: ${formatMoney(c.totalDebt)}` : '· (خالص)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Credit Warning Banner when no customer is selected */}
+              {saleType === 'credit' && !selectedCustomerId && (
+                <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-lg text-[11px] flex items-start gap-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-extrabold">لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام.</p>
+                    <p className="text-[10px] text-amber-800 mt-0.5">
+                      اختر الزبون من القائمة أعلاه، أو اضغط على زر الاقتراح لإضافته واعتماده فوراً:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
+                      className="mt-1.5 px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-md font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      <span>اقتراح إضافة هذا الزبون الآن</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Selected Customer Card with Info & Debt Breakdown */}
+              {selectedCustomer && (
+                <div className="bg-white border border-emerald-300 rounded-lg p-2.5 text-xs space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between font-bold text-slate-900">
+                    <div className="flex items-center gap-1.5 text-emerald-800">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>زبون معتمد: {selectedCustomer.name}</span>
+                    </div>
+                    {selectedCustomer.phone && (
+                      <span className="text-[11px] text-slate-500 font-mono" dir="ltr">{selectedCustomer.phone}</span>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                    <span className="text-slate-600">الدين السابق المستحق بذمته:</span>
+                    <span className={`font-mono font-bold ${selectedCustomer.totalDebt > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                      {selectedCustomer.totalDebt > 0 ? formatMoney(selectedCustomer.totalDebt) : 'لا توجد ديون سابقة (خالص)'}
+                    </span>
+                  </div>
+
+                  {saleType === 'credit' && remainingDebt > 0 && (
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-dashed border-amber-300 text-amber-950 font-bold">
+                      <span>إجمالي الدين الجديد بعد هذه القائمة:</span>
+                      <span className="font-mono text-xs text-rose-800 font-black">
+                        {formatMoney(newCustomerDebt)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* In Direct Sale: Manual name/phone for receipt if not selecting from list */}
+              {saleType === 'direct' && !selectedCustomerId && (
+                <div className="space-y-1 pt-1 border-t border-slate-200/60">
+                  <span className="text-[11px] font-bold text-slate-600 block">
+                    اسم الزبون غير المضاف (للوصل والطباعة - اختياري):
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="اسم الزبون غير المضاف..."
+                      value={customCustomerName}
+                      onChange={(e) => setCustomCustomerName(e.target.value)}
+                      className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="رقم الهاتف (اختياري)..."
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Credit Sale Specific Inputs: Downpayment & Remaining */}
+              {saleType === 'credit' && (
+                <div className="space-y-2 pt-2 border-t border-amber-200">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-900 text-xs">المبلغ المسدد نقداً الآن:</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max={finalTotal}
+                        value={paidAmount || ''}
+                        placeholder="0"
+                        onChange={(e) => setPaidAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-28 text-left px-2 py-1 text-xs font-bold border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                      <span className="text-amber-800 font-semibold text-xs">{settings.currency}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200/60 text-xs">
+                    <span>المبلغ الآجل المتبقي بالدين:</span>
+                    <span className="text-rose-700">{formatMoney(remainingDebt)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 text-xs">
+                    <span className="text-slate-600 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-amber-700" />
+                      تاريخ استحقاق السداد:
+                    </span>
+                    <input
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="text-xs px-2 py-0.5 border border-slate-300 rounded bg-white text-slate-700"
+                    />
+                  </div>
+                </div>
+              )}
+
+            </div>
 
             {/* Notes */}
             <input
@@ -874,21 +1191,33 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
 
+            {/* Credit Warning Alert right above action buttons if credit sale without registered customer */}
+            {saleType === 'credit' && !selectedCustomerId && (
+              <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <div className="flex-1 text-[11px] leading-tight">
+                  لا يمكن حفظ القائمة بالآجل إلا لزبون مضاف اسمه مسبقاً! يرجى اختيار زبون مسجل أو الضغط على زر الاقتراح لإضافته.
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
-                disabled={cartItems.length === 0}
+                disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                 onClick={() => handleSaveInvoice(true)}
-                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة'}
               >
                 <Printer className="w-4 h-4" />
                 <span>حفظ وطباعة القائمة</span>
               </button>
 
               <button
-                disabled={cartItems.length === 0}
+                disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                 onClick={() => handleSaveInvoice(false)}
-                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط'}
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>حفظ فقط</span>
@@ -912,6 +1241,202 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     )}
 
   </div>
+
+  <BarcodeScannerModal
+    isOpen={isScannerOpen}
+    onClose={() => setIsScannerOpen(false)}
+    onScan={handleBarcodeScanned}
+    title="ماسح باركود نقطة البيع (POS)"
+  />
+
+  {/* Quick Add Customer Modal */}
+  {showQuickAddModal && (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+        
+        {/* Modal Header */}
+        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center">
+              <UserPlus className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">إضافة زبون جديد لسجل الديون</h3>
+              <p className="text-[11px] text-slate-500">لا يمكن البيع بالآجل إلا لزبون معتمد ومسجل مسبقاً</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowQuickAddModal(false)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Modal Form */}
+        <form onSubmit={handleSaveQuickCustomer} className="p-4 space-y-3">
+          {quickCustomerError && (
+            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1.5">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{quickCustomerError}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              اسم الزبون الكامل <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="مثال: علي محمد حسن"
+              value={quickCustomerName}
+              onChange={(e) => setQuickCustomerName(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                رقم الهاتف (اختياري)
+              </label>
+              <input
+                type="tel"
+                placeholder="0770..."
+                value={quickCustomerPhone}
+                onChange={(e) => setQuickCustomerPhone(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                العنوان / المنطقة (اختياري)
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: الكرادة، بغداد"
+                value={quickCustomerAddress}
+                onChange={(e) => setQuickCustomerAddress(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              رصيد دين سابق إن وجد (اختياري)
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                placeholder="0"
+                value={quickCustomerInitialDebt}
+                onChange={(e) => setQuickCustomerInitialDebt(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                className="w-full pl-12 pr-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                {settings.currency || 'دينار'}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              إذا كان على الزبون دين متبقي من فترات سابقة قبل استخدام البرنامج.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowQuickAddModal(false)}
+              className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>حفظ واعتماد الزبون للبيع الآجل</span>
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  )}
+
+  {/* Unfound Barcode Prompt Modal - يظهر تلقائياً عند قراءة باركود غير موجود في المخزن */}
+  {unfoundBarcodePrompt && (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+        
+        {/* Header */}
+        <div className="p-4 border-b border-amber-200 bg-amber-50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center">
+              <Scan className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-amber-950">مادة غير مسجلة في المخزن</h3>
+              <p className="text-[11px] text-amber-800">تمت قراءة الرمز الشريطي بواسطة الماسح</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUnfoundBarcodePrompt(null)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-amber-100 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-5 space-y-4">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+            <div className="text-xs text-slate-500 font-bold mb-1">الرمز الشريطي (الباركود) المقروء:</div>
+            <div className="text-lg font-black font-mono text-slate-900 tracking-wider">
+              #{unfoundBarcodePrompt}
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-700 leading-relaxed">
+            تمت قراءة هذا الرمز الشريطي بنجاح، ولكنه غير موجود ضمن المواد المخزنة حالياً.
+            <br />
+            <strong className="text-emerald-800">هل ترغب في إضافة هذه المادة الجديدة إلى المخزن الآن واعتماد هذا الرمز لها؟</strong>
+          </p>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setUnfoundBarcodePrompt(null)}
+              className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const scanned = unfoundBarcodePrompt;
+                setUnfoundBarcodePrompt(null);
+                onOpenNewProduct(scanned);
+              }}
+              className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ إضافة المادة للمخزن الآن</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )}
 
 </div>
   );

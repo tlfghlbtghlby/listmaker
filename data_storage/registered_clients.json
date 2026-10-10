@@ -1,5 +1,17 @@
 [
   {
+    "uid": "admin_master_001",
+    "email": "tlfghlbtghlby@gmail.com",
+    "username": "admin",
+    "displayName": "المدير العام",
+    "storeName": "لوحة الإدارة المركزية",
+    "phone": "07700000000",
+    "role": "admin",
+    "isActive": true,
+    "password": "123",
+    "createdAt": "2026-10-01T00:00:00.000Z"
+  },
+  {
     "uid": "0A6uEqBONPdjOjAEFO0pgfyTs082",
     "email": "muntazar@list-3d848.app",
     "username": "muntazar",

@@ -14,9 +14,11 @@ import {
   Tag,
   Download,
   Filter,
-  Box
+  Box,
+  Scan
 } from 'lucide-react';
 import { getCartonBreakdown } from '../utils/cartonUtils';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface InventoryViewProps {
   onOpenNewProduct: () => void;
@@ -30,6 +32,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const { products, deleteProduct, adjustStock, formatMoney, settings } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'stock' | 'profit' | 'price'>('name');
@@ -159,15 +162,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           
           {/* Search */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث باسم المادة، الرمز، أو الباركود..."
-              className="w-full pl-3 pr-10 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-50/50"
-            />
+          <div className="relative flex-1 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ابحث باسم المادة، الرمز، أو الباركود..."
+                className="w-full pl-3 pr-10 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-slate-50/50"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-xs text-slate-400 hover:text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 cursor-pointer font-bold"
+                >
+                  مسح
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg text-slate-700 text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+              title="مسح باركود بالكاميرا للبحث عن المادة فوراً"
+            >
+              <Scan className="w-4 h-4 text-emerald-600" />
+              <span className="hidden sm:inline">مسح باركود</span>
+            </button>
           </div>
 
           {/* Action buttons */}
@@ -428,6 +452,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </table>
         </div>
       </div>
+
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={(scanned) => {
+          setSearchQuery(scanned);
+          setIsScannerOpen(false);
+        }}
+        title="مسح باركود المادة في المخزن"
+      />
 
     </div>
   );

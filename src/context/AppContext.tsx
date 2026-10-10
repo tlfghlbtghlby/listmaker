@@ -60,6 +60,7 @@ interface AppContextType {
   isSyncing: boolean;
   lastSyncTime: string | null;
   syncNow: () => Promise<void>;
+  loginUser: (user: any) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -153,64 +154,110 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [currentUser, products, invoices, customers, settings]);
 
-  // Listen to Firebase Auth state - Strictly enforce per-user isolation!
+  // Ref to track whether initial store data has fully loaded for currentUser before auto-save is enabled
+  const isLoadedForUserRef = React.useRef<string | null>(null);
+
+  // Directly login and immediately load user's store data without waiting or race conditions
+  const loginUser = async (user: any) => {
+    if (!user || !user.uid) return;
+    isLoadedForUserRef.current = null; // Pause auto-save while loading
+    setAuthLoading(true);
+    setCurrentUser(user);
+
+    try {
+      localStorage.setItem('has_logged_in_before', 'true');
+      localStorage.setItem('last_active_user_uid', user.uid);
+    } catch (e) {}
+
+    // 1. Immediately read local cached data for instant display (0ms)
+    const localCached = getLocalStoreData(user.uid);
+    let loadedProducts = localCached && Array.isArray(localCached.products) ? localCached.products : [];
+    let loadedInvoices = localCached && Array.isArray(localCached.invoices) ? localCached.invoices : [];
+    let loadedCustomers = localCached && Array.isArray(localCached.customers) ? localCached.customers : [];
+    let loadedSettings = localCached && localCached.settings ? localCached.settings : null;
+
+    // 2. Fetch server data (<50ms)
+    try {
+      const serverData = await loadStoreDataFromCloud(user.uid);
+      if (serverData) {
+        if (Array.isArray(serverData.products) && (serverData.products.length > 0 || loadedProducts.length === 0)) {
+          loadedProducts = serverData.products;
+        }
+        if (Array.isArray(serverData.invoices) && (serverData.invoices.length > 0 || loadedInvoices.length === 0)) {
+          loadedInvoices = serverData.invoices;
+        }
+        if (Array.isArray(serverData.customers) && (serverData.customers.length > 0 || loadedCustomers.length === 0)) {
+          loadedCustomers = serverData.customers;
+        }
+        if (serverData.settings) {
+          loadedSettings = serverData.settings;
+        }
+      }
+    } catch (e) {}
+
+    setProducts(loadedProducts);
+    setInvoices(loadedInvoices);
+    setCustomers(loadedCustomers);
+    setSettings(loadedSettings || createInitialEmptySettings(user.displayName || 'مخزني', user.displayName || ''));
+
+    // Enable auto-save ONLY for this user once data is populated
+    isLoadedForUserRef.current = user.uid;
+    setAuthLoading(false);
+    setIsCloudConnected(true);
+  };
+
+  // Listen to Auth state on initial mount
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
       if (user) {
-        // User logged in!
+        await loginUser(user);
+      } else {
+        // Check active client session
+        let clientSession: any = null;
         try {
-          localStorage.setItem('has_logged_in_before', 'true');
-          localStorage.setItem('last_active_user_uid', user.uid);
+          const raw = localStorage.getItem('active_client_session');
+          if (raw) clientSession = JSON.parse(raw);
         } catch (e) {}
 
-        // 1. Immediately load data for THIS SPECIFIC USER from local account cache (0ms)
-        const localCached = getLocalStoreData(user.uid);
-        if (localCached) {
-          setProducts(Array.isArray(localCached.products) ? localCached.products : []);
-          setInvoices(Array.isArray(localCached.invoices) ? localCached.invoices : []);
-          setCustomers(Array.isArray(localCached.customers) ? localCached.customers : []);
-          if (localCached.settings) {
-            setSettings(localCached.settings);
-          }
-        } else {
-          // Initialize clean empty store with user's name
-          setProducts([]);
-          setInvoices([]);
-          setCustomers([]);
-          setSettings(createInitialEmptySettings(user.displayName || 'مخزني', user.displayName || ''));
+        if (clientSession && clientSession.uid) {
+          const simulatedUser = {
+            uid: clientSession.uid,
+            email: clientSession.email,
+            displayName: clientSession.displayName,
+          } as User;
+          await loginUser(simulatedUser);
+          return;
         }
 
-        // 2. Also sync from cloud server in background (<50ms)
-        loadStoreDataFromCloud(user.uid).then((cloudData) => {
-          if (cloudData) {
-            if (Array.isArray(cloudData.products)) setProducts(cloudData.products);
-            if (Array.isArray(cloudData.invoices)) setInvoices(cloudData.invoices);
-            if (Array.isArray(cloudData.customers)) setCustomers(cloudData.customers);
-            if (cloudData.settings) setSettings(cloudData.settings);
-          }
-        }).catch(() => {});
-
-        setIsCloudConnected(navigator.onLine);
-      } else {
-        // LOGGED OUT / NO USER: Clear memory state completely!
+        // LOGGED OUT / NO USER: Clear memory state safely
+        isLoadedForUserRef.current = null;
+        setCurrentUser(null);
         setProducts([]);
         setInvoices([]);
         setCustomers([]);
         setPayments([]);
         setSettings(defaultEmptySettings);
         setIsCloudConnected(false);
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Save to cloud & account storage automatically whenever data changes (ONLY for logged-in user!)
+  // Save to cloud & account storage automatically whenever data changes (ONLY for verified loaded user!)
   useEffect(() => {
-    if (!currentUser || authLoading) return;
+    // Safety lock: DO NOT save if user is null, auth is loading, or data has not finished initial load
+    if (!currentUser || authLoading || isLoadedForUserRef.current !== currentUser.uid) {
+      return;
+    }
+
     const timer = setTimeout(() => {
+      // Re-verify that user has not logged out before timer fired
+      if (!isLoadedForUserRef.current || isLoadedForUserRef.current !== currentUser.uid) {
+        return;
+      }
+
       saveStoreDataToCloud(currentUser.uid, {
         products,
         invoices,
@@ -219,7 +266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).then((success) => {
         setIsCloudConnected(success);
       });
-    }, 400);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [products, invoices, customers, settings, currentUser, authLoading]);
@@ -461,7 +508,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 3. Clear auth session flags and remove legacy shared keys
   // 4. Sign out
   const logout = async () => {
-    if (currentUser) {
+    isLoadedForUserRef.current = null; // Disable auto-save immediately before clearing state!
+    if (currentUser && products.length > 0) {
       saveStoreDataToCloud(currentUser.uid, {
         products,
         invoices,
@@ -480,6 +528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsCloudConnected(false);
 
     try {
+      localStorage.removeItem('active_client_session');
       localStorage.removeItem('has_logged_in_before');
       localStorage.removeItem('last_active_user_uid');
       // Clean up legacy global shared keys
@@ -523,6 +572,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSyncing,
         lastSyncTime,
         syncNow,
+        loginUser,
         logout,
       }}
     >

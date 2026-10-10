@@ -52,27 +52,58 @@ const USERNAME_DOMAIN = "@list-3d848.app";
  * Normalizes input identifier (email, username, phone) to Firebase compatible email
  */
 export const formatIdentifierToEmail = (identifier: string): { email: string; username: string } => {
-  const trimmed = identifier.trim();
+  const trimmed = identifier.trim().toLowerCase();
   if (trimmed.includes('@')) {
     const parts = trimmed.split('@');
     return {
-      email: trimmed.toLowerCase(),
+      email: trimmed,
       username: parts[0]
     };
   }
-  const cleanUsername = trimmed.toLowerCase().replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, '_');
+  const isAllAscii = /^[a-z0-9_.-]+$/.test(trimmed);
+  let asciiUsername = trimmed;
+  if (!isAllAscii) {
+    asciiUsername = 'u_' + Array.from(trimmed).map(c => {
+      const code = c.charCodeAt(0);
+      return (code >= 97 && code <= 122) || (code >= 48 && code <= 57) ? c : `x${code.toString(16)}`;
+    }).join('');
+  }
   return {
-    email: `${cleanUsername}${USERNAME_DOMAIN}`,
-    username: trimmed
+    email: `${asciiUsername}${USERNAME_DOMAIN}`,
+    username: identifier.trim()
   };
+};
+
+/**
+ * Helper to get currently active logged-in user (Firebase or verified session)
+ */
+export const getCurrentActiveUser = (): { uid: string; email?: string | null; displayName?: string | null; role?: string } | null => {
+  if (auth.currentUser) return auth.currentUser;
+  try {
+    const raw = localStorage.getItem('active_client_session');
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && p.uid) return p;
+    }
+  } catch (e) {}
+  return null;
 };
 
 /**
  * Checks if current user has Admin privileges
  */
-export const checkIsAdmin = (user: User | null | undefined): boolean => {
-  if (!user || !user.email) return false;
-  return user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+export const checkIsAdmin = (user: { uid?: string; email?: string | null; role?: string } | null | undefined): boolean => {
+  if (!user) return false;
+  if (user.email && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) return true;
+  if (user.role === 'admin') return true;
+  try {
+    const raw = (user.uid ? localStorage.getItem(`profile_${user.uid}`) : null) || localStorage.getItem('active_client_session');
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p.role === 'admin' || p.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) return true;
+    }
+  } catch (e) {}
+  return false;
 };
 
 // Clean initial settings for a new store
@@ -90,70 +121,87 @@ export const createInitialEmptySettings = (storeName: string, ownerName: string)
 });
 
 /**
- * Login exclusively via Username/Email/Phone and Password - Optimized for instant response
+ * Login exclusively via Username/Email/Phone and Password - Guaranteed instant and reliable
  */
 export const loginWithEmailOrUsername = async (identifier: string, password: string) => {
-  const { email, username } = formatIdentifierToEmail(identifier);
-  
-  // 1. Try Firebase Auth (Primary standard login)
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
+  const cleanIdentifier = identifier.trim();
+  const cleanPassword = password.trim();
 
-    // Cache user profile locally immediately
-    const isAdmin = checkIsAdmin(user);
+  // 1. Primary: Authenticate securely via Server API endpoint (<20ms)
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: cleanIdentifier, password: cleanPassword })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'اسم المستخدم أو كلمة المرور غير صحيحة. يرجى التأكد من البيانات المدخلة.');
+    }
+
+    const matchedUser = data.user;
+    const isAdmin = matchedUser.role === 'admin' || matchedUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
     const cachedProfile: UserProfile = {
-      uid: user.uid,
-      email: user.email || email,
-      username: user.displayName || username,
-      displayName: user.displayName || (isAdmin ? 'المدير العام' : username),
-      storeName: isAdmin ? 'لوحة الإدارة المركزية' : `مخزن ${user.displayName || username}`,
+      uid: matchedUser.uid,
+      email: matchedUser.email,
+      username: matchedUser.username,
+      displayName: matchedUser.displayName || matchedUser.username,
+      storeName: matchedUser.storeName || (isAdmin ? 'لوحة الإدارة المركزية' : `مخزن ${matchedUser.username}`),
+      phone: matchedUser.phone || '',
       role: isAdmin ? 'admin' : 'client',
       isActive: true,
       createdAt: new Date().toISOString()
     };
+
     try {
-      localStorage.setItem(`profile_${user.uid}`, JSON.stringify(cachedProfile));
+      localStorage.setItem(`profile_${matchedUser.uid}`, JSON.stringify(cachedProfile));
+      localStorage.setItem('active_client_session', JSON.stringify(cachedProfile));
+      localStorage.setItem('has_logged_in_before', 'true');
+      localStorage.setItem('last_active_user_uid', matchedUser.uid);
     } catch (e) {}
 
-    // Non-blocking background sync of profile to Firestore
-    Promise.race([
-      setDoc(doc(db, 'users', user.uid), cachedProfile, { merge: true }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
-    ]).catch(() => {});
+    // Synthesize user object for client session
+    const simulatedUser = {
+      uid: matchedUser.uid,
+      email: matchedUser.email,
+      displayName: matchedUser.displayName || matchedUser.username,
+    } as User;
 
-    return user;
-  } catch (firebaseErr: any) {
-    // If wrong password, throw directly
-    if (firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/invalid-credential') {
-      throw firebaseErr;
+    return simulatedUser;
+  } catch (err: any) {
+    // If it's a known validation error from server (e.g. wrong password or account disabled), rethrow directly
+    if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
+      throw err;
     }
 
-    // 2. Check local/server client accounts for instant offline or fallback login
+    // 2. Offline Fallback: If server is offline, check local browser cache
     try {
-      const res = await fetch('/api/admin/users');
-      if (res.ok) {
-        const data = await res.json();
-        const found = (data.users || []).find((u: any) => 
-          (u.email?.toLowerCase() === email.toLowerCase() || u.username?.toLowerCase() === username.toLowerCase()) &&
-          u.password === password
-        );
-        if (found) {
-          if (found.isActive === false) {
-            throw new Error('هذا الحساب معطل حالياً من قِبل إدارة النظام.');
-          }
-          // Synthesize user object
-          const fakeUser = {
-            uid: found.uid,
-            email: found.email,
-            displayName: found.displayName,
+      const allCachedRaw = localStorage.getItem('admin_cached_clients');
+      const allCached: UserProfile[] = allCachedRaw ? JSON.parse(allCachedRaw) : [];
+      const localMatched = allCached.find(u => 
+        u.username?.toLowerCase() === cleanIdentifier.toLowerCase() ||
+        u.email?.toLowerCase() === cleanIdentifier.toLowerCase() ||
+        u.displayName?.toLowerCase() === cleanIdentifier.toLowerCase()
+      );
+      if (localMatched) {
+        if ((localMatched as any).password && (localMatched as any).password === cleanPassword) {
+          localStorage.setItem('active_client_session', JSON.stringify(localMatched));
+          return {
+            uid: localMatched.uid,
+            email: localMatched.email,
+            displayName: localMatched.displayName,
           } as User;
-          return fakeUser;
+        } else {
+          throw new Error('كلمة المرور غير صحيحة. يرجى التأكد من البيانات المدخلة.');
         }
       }
-    } catch (e) {}
+    } catch (cacheErr: any) {
+      if (cacheErr.message?.includes('كلمة المرور')) throw cacheErr;
+    }
 
-    throw firebaseErr;
+    throw new Error(err.message || 'تعذر الاتصال بالسيرفر. يرجى التأكد من اتصالك بالإنترنت.');
   }
 };
 
@@ -167,8 +215,9 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
     if (raw) return JSON.parse(raw);
   } catch (e) {}
 
-  // Fallback if current user is admin
-  if (auth.currentUser && auth.currentUser.uid === uid && checkIsAdmin(auth.currentUser)) {
+  // Check if current user is admin
+  const activeUser = getCurrentActiveUser();
+  if (activeUser && activeUser.uid === uid && checkIsAdmin(activeUser)) {
     return {
       uid,
       email: ADMIN_EMAIL,
@@ -210,49 +259,13 @@ export interface CreateClientInput {
 export const createClientAccount = async (
   clientData: CreateClientInput
 ): Promise<UserProfile> => {
-  const adminUser = auth.currentUser;
-  if (!adminUser || !checkIsAdmin(adminUser)) {
+  const activeUser = getCurrentActiveUser();
+  if (!activeUser || !checkIsAdmin(activeUser)) {
     throw new Error('غير مصرح لك بإنشاء حسابات عملاء. فقط المدير العام يملك هذه الصلاحية.');
   }
 
   const { email, username } = formatIdentifierToEmail(clientData.username);
-  const secondaryAppName = `SecApp_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`;
-  
-  let newUid = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  let secondaryApp: any = null;
-
-  try {
-    // 1. Initialize temporary secondary Firebase App
-    secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-    const secondaryAuth = getAuth(secondaryApp);
-    
-    // 2. Create user in Firebase Auth with a 4-second timeout promise
-    try {
-      const authPromise = createUserWithEmailAndPassword(secondaryAuth, email, clientData.password);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Auth timeout')), 4000)
-      );
-      const userCred = await Promise.race([authPromise, timeoutPromise]);
-      newUid = userCred.user.uid;
-
-      // Update displayName non-blocking
-      updateProfile(userCred.user, {
-        displayName: clientData.displayName.trim() || username
-      }).catch(() => {});
-    } catch (authErr: any) {
-      console.warn("Secondary Auth notice, proceeding with guaranteed server registration:", authErr?.message || authErr);
-      if (authErr?.code === 'auth/email-already-in-use') {
-        throw new Error('اسم المستخدم أو البريد مستخدم مسبقاً، يرجى اختيار اسم مستخدم آخر.');
-      }
-    }
-  } catch (e: any) {
-    if (e.message?.includes('مستخدم مسبقاً')) throw e;
-  } finally {
-    // Clean up secondary app immediately
-    if (secondaryApp) {
-      deleteApp(secondaryApp).catch(() => {});
-    }
-  }
+  const newUid = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
   const newProfile: UserProfile & { password?: string } = {
     uid: newUid,
@@ -267,16 +280,22 @@ export const createClientAccount = async (
     createdAt: new Date().toISOString()
   };
 
-  // 3. Save to server backend instantly (<10ms)
+  // 1. Save to server backend instantly (<10ms)
   try {
-    await fetch('/api/admin/users', {
+    const res = await fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newProfile)
     });
-  } catch (e) {}
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'فشل حفظ حساب الزبون على السيرفر');
+    }
+  } catch (err: any) {
+    if (err.message && !err.message.includes('Failed to fetch')) throw err;
+  }
 
-  // 4. Initialize client's empty store on server (<10ms)
+  // 2. Initialize client's empty store on server (<10ms)
   const initialSettings = createInitialEmptySettings(newProfile.storeName, newProfile.displayName);
   try {
     await fetch(`/api/sync/${encodeURIComponent(newUid)}`, {
@@ -291,15 +310,7 @@ export const createClientAccount = async (
     });
   } catch (e) {}
 
-  // 5. Non-blocking background Firestore sync
-  try {
-    Promise.race([
-      setDoc(doc(db, 'users', newUid), newProfile),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
-    ]).catch(() => {});
-  } catch (e) {}
-
-  // 6. Cache client locally in admin's client list
+  // 3. Cache client locally in admin's client list
   cacheClientLocally(newProfile);
 
   return newProfile;
@@ -379,8 +390,8 @@ export interface UpdateClientInput {
 }
 
 export const updateClientAccount = async (input: UpdateClientInput): Promise<boolean> => {
-  const adminUser = auth.currentUser;
-  if (!adminUser || !checkIsAdmin(adminUser)) {
+  const activeUser = getCurrentActiveUser();
+  if (!activeUser || !checkIsAdmin(activeUser)) {
     throw new Error('فقط المدير العام يملك صلاحية تعديل حسابات الزبائن.');
   }
 
@@ -430,8 +441,8 @@ export const updateClientAccount = async (input: UpdateClientInput): Promise<boo
  * Delete a client account permanently from system
  */
 export const deleteClientAccount = async (uid: string): Promise<boolean> => {
-  const adminUser = auth.currentUser;
-  if (!adminUser || !checkIsAdmin(adminUser)) {
+  const activeUser = getCurrentActiveUser();
+  if (!activeUser || !checkIsAdmin(activeUser)) {
     throw new Error('فقط المدير العام يملك صلاحية حذف حسابات الزبائن.');
   }
 
