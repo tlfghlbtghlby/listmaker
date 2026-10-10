@@ -22,13 +22,18 @@ import {
   ArrowRight,
   Scan,
   UserPlus,
-  X
+  Pencil,
+  Box,
+  Save,
+  X,
+  Package
 } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface POSViewProps {
   onInvoiceCreated: (invoice: Invoice) => void;
   onOpenNewProduct: (initialBarcode?: string) => void;
+  onEditProduct?: (product: Product) => void;
   onOpenSettings?: () => void;
 }
 
@@ -65,8 +70,8 @@ const playScannerBeep = (type: 'success' | 'alert' = 'success') => {
   }
 };
 
-export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewProduct, onOpenSettings }) => {
-  const { products, customers, createInvoice, updateSettings, formatMoney, settings, addCustomer } = useApp();
+export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewProduct, onEditProduct, onOpenSettings }) => {
+  const { products, customers, createInvoice, updateSettings, formatMoney, settings, addCustomer, updateProduct } = useApp();
 
   // POS State
   const [saleType, setSaleType] = useState<SaleType>('direct');
@@ -90,6 +95,61 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const [quickCustomerAddress, setQuickCustomerAddress] = useState('');
   const [quickCustomerInitialDebt, setQuickCustomerInitialDebt] = useState<number | ''>('');
   const [quickCustomerError, setQuickCustomerError] = useState('');
+
+  // Quick Price Edit Modal State (تعديل السعر المباشر من بطاقة المادة)
+  const [productForPriceEdit, setProductForPriceEdit] = useState<Product | null>(null);
+  const [editRetailPrice, setEditRetailPrice] = useState<number | ''>('');
+  const [editWholesalePrice, setEditWholesalePrice] = useState<number | ''>('');
+  const [editCostPrice, setEditCostPrice] = useState<number | ''>('');
+  const [editPiecesPerCarton, setEditPiecesPerCarton] = useState<number | ''>('');
+
+  const handleOpenPriceEdit = (prod: Product) => {
+    setProductForPriceEdit(prod);
+    setEditRetailPrice(prod.retailPrice);
+    setEditWholesalePrice(prod.wholesalePrice);
+    setEditCostPrice(prod.costPrice);
+    setEditPiecesPerCarton(prod.piecesPerCarton || 1);
+  };
+
+  const handleSavePriceEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!productForPriceEdit) return;
+
+    const newRetail = typeof editRetailPrice === 'number' ? editRetailPrice : productForPriceEdit.retailPrice;
+    const newWholesale = typeof editWholesalePrice === 'number' ? editWholesalePrice : productForPriceEdit.wholesalePrice;
+    const newCost = typeof editCostPrice === 'number' ? editCostPrice : productForPriceEdit.costPrice;
+    const newCarton = typeof editPiecesPerCarton === 'number' && editPiecesPerCarton > 0 ? editPiecesPerCarton : (productForPriceEdit.piecesPerCarton || 1);
+
+    updateProduct(productForPriceEdit.id, {
+      retailPrice: newRetail,
+      wholesalePrice: newWholesale,
+      costPrice: newCost,
+      piecesPerCarton: newCarton,
+    });
+
+    // Also update any item in the active cart with this product
+    setCartItems(prev => prev.map(item => {
+      if (item.productId === productForPriceEdit.id) {
+        const isWholesale = item.priceType === 'wholesale';
+        const basePiece = isWholesale ? newWholesale : newRetail;
+        const isCarton = item.unitType === 'carton';
+        const effectiveUnit = isCarton ? basePiece * newCarton : basePiece;
+        return {
+          ...item,
+          costPrice: newCost,
+          piecesPerCarton: newCarton,
+          unitPrice: effectiveUnit,
+          deductedPieces: isCarton ? item.quantity * newCarton : item.quantity,
+          total: item.quantity * effectiveUnit,
+        };
+      }
+      return item;
+    }));
+
+    setScanNotice(`تم تحديث أسعار مادة "${productForPriceEdit.name}" بنجاح`);
+    setTimeout(() => setScanNotice(null), 3000);
+    setProductForPriceEdit(null);
+  };
 
   // Barcode scanner & instant feedback
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -183,33 +243,40 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const addToCartWithPrice = (product: Product, priceType: PriceType, delta = 1) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.productId === product.id);
-      const unitPrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
+      const piecePrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
 
       if (existingIndex > -1) {
         // مادة موجودة بالقائمة: يزداد عددها فقط دون تكرار
         return prev.map((item, idx) => {
           if (idx === existingIndex) {
             const newQty = item.quantity + delta;
+            const cartonCap = item.piecesPerCarton || product.piecesPerCarton || 1;
+            const deductedPieces = item.unitType === 'carton' ? newQty * cartonCap : newQty;
             return {
               ...item,
               quantity: newQty,
+              deductedPieces,
               total: newQty * item.unitPrice,
             };
           }
           return item;
         });
       } else {
-        // مادة جديدة: تضاف إلى القائمة
+        // مادة جديدة: تضاف إلى القائمة (الوحدة الافتراضية: قطعة)
+        const cartonCap = product.piecesPerCarton || 1;
         const newItem: InvoiceItem = {
           productId: product.id,
           productName: product.name,
           code: product.code,
           unit: product.unit,
           priceType: priceType,
+          unitType: 'piece',
+          piecesPerCarton: cartonCap,
+          deductedPieces: delta,
           costPrice: product.costPrice,
-          unitPrice: unitPrice,
+          unitPrice: piecePrice,
           quantity: delta,
-          total: delta * unitPrice,
+          total: delta * piecePrice,
         };
         return [...prev, newItem];
       }
@@ -302,10 +369,47 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.productId === productId) {
+          const cartonCap = item.piecesPerCarton || 1;
+          const isCarton = item.unitType === 'carton';
+          const deductedPieces = isCarton ? newQty * cartonCap : newQty;
           return {
             ...item,
             quantity: newQty,
+            deductedPieces,
             total: newQty * item.unitPrice,
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  // Switch unit type between 'piece' (قطعة) and 'carton' (كرتون)
+  const toggleItemUnitType = (productId: string, newUnitType: 'piece' | 'carton') => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return;
+
+    const cartonCapacity = Math.max(1, prod.piecesPerCarton || 1);
+
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.productId === productId) {
+          const piecePrice = item.priceType === 'wholesale' ? prod.wholesalePrice : prod.retailPrice;
+          const pieceCost = prod.costPrice;
+          const isCarton = newUnitType === 'carton';
+          const effectiveUnitPrice = isCarton ? piecePrice * cartonCapacity : piecePrice;
+          const effectiveCostPrice = isCarton ? pieceCost * cartonCapacity : pieceCost;
+          const deductedPieces = isCarton ? item.quantity * cartonCapacity : item.quantity;
+          const total = item.quantity * effectiveUnitPrice;
+
+          return {
+            ...item,
+            unitType: newUnitType,
+            piecesPerCarton: cartonCapacity,
+            unitPrice: effectiveUnitPrice,
+            costPrice: effectiveCostPrice,
+            deductedPieces,
+            total,
           };
         }
         return item;
@@ -318,11 +422,14 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     const prod = products.find((p) => p.id === productId);
     if (!prod) return;
 
-    const newUnitPrice = newPriceType === 'wholesale' ? prod.wholesalePrice : prod.retailPrice;
-
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.productId === productId) {
+          const cartonCap = item.piecesPerCarton || prod.piecesPerCarton || 1;
+          const isCarton = item.unitType === 'carton';
+          const basePiecePrice = newPriceType === 'wholesale' ? prod.wholesalePrice : prod.retailPrice;
+          const newUnitPrice = isCarton ? basePiecePrice * cartonCap : basePiecePrice;
+
           return {
             ...item,
             priceType: newPriceType,
@@ -591,8 +698,8 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             </div>
 
-            {/* Products List - Horizontal Rectangular Layout */}
-            <div className={`flex flex-col gap-2.5 ${isMobileMode ? 'max-h-[calc(100vh-250px)] pb-16' : 'max-h-[calc(100vh-270px)]'} overflow-y-auto pr-1`}>
+            {/* Products List - Full Vertical Extension: ممتد لنهاية البرنامج بالكامل دون التقيد بخانة مربعة محددة */}
+            <div className="flex flex-col gap-2.5 flex-1 pb-24">
               {filteredProducts.length === 0 ? (
                 <div className="py-12 text-center bg-white rounded-xl border border-slate-200 p-6">
                   <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
@@ -613,42 +720,64 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           : 'border-slate-200 hover:border-emerald-500 hover:shadow-xs'
                       }`}
                     >
-                      {/* Right side: Product Name, Code, Unit, Category & Stock */}
+                      {/* Right side: Product Name, Stock (ABOVE name), Code, Unit, Category & Edit Price Button */}
                       <div
                         onClick={() => !isOutOfStock && addToCart(prod)}
                         className="flex-1 min-w-0 cursor-pointer"
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-bold">
-                            #{prod.code}
-                          </span>
-                          <span className="text-xs text-slate-500 font-medium">
-                            {prod.category}
-                          </span>
-                          <span className="text-slate-300">·</span>
+                        {/* 1. المتوفر فوق الاسم حتى لا يتداخل مع أي شيء آخر */}
+                        <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
                           <span
-                            className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                            className={`text-xs font-bold px-2.5 py-0.5 rounded-md border flex items-center gap-1 shrink-0 ${
                               isOutOfStock
-                                ? 'bg-rose-50 text-rose-700'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
                                 : isLowStock
-                                ? 'bg-amber-50 text-amber-800'
-                                : 'bg-slate-100 text-slate-600'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                             }`}
                           >
-                            {isOutOfStock ? 'نافد من المخزن' : `المتوفر: ${prod.stock} ${prod.unit}`}
+                            <Package className="w-3.5 h-3.5 shrink-0" />
+                            <span>{isOutOfStock ? 'نافد من المخزن' : `المتوفر: ${prod.stock} ${prod.unit}`}</span>
+                            {prod.piecesPerCarton && prod.piecesPerCarton > 1 && !isOutOfStock && (
+                              <span className="text-[10px] text-slate-500 font-normal mr-1">
+                                ({Math.floor(prod.stock / prod.piecesPerCarton)} كرتون)
+                              </span>
+                            )}
+                          </span>
+
+                          <span className="text-[11px] font-mono text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded font-bold shrink-0">
+                            #{prod.code}
+                          </span>
+                          <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded shrink-0">
+                            {prod.category}
                           </span>
                         </div>
 
-                        <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug group-hover:text-emerald-700 transition truncate">
-                          {prod.name}
-                        </h3>
+                        {/* 2. اسم المادة مع زر قلم صغير جانبه لتعديل السعر بدون تداخل */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug group-hover:text-emerald-700 transition">
+                            {prod.name}
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenPriceEdit(prod);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200/90 rounded-md transition shadow-2xs shrink-0 cursor-pointer"
+                            title="تعديل سعر المادة"
+                          >
+                            <Pencil className="w-3 h-3 text-blue-600" />
+                            <span className="text-[10px] font-bold">تعديل السعر</span>
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Left side: Prices shown */}
+                      {/* Left side: Prices shown & Actions (بدون تداخل) */}
                       <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
                         
-                        {/* 1. Wholesale Cost Price Box - ALWAYS VISIBLE (سعر تكلفة الجملة يظل ظاهراً دائماً حتى في وضع الإخفاء) */}
-                        <div className="bg-slate-100 border border-slate-300/80 rounded-lg px-2.5 py-1 text-right min-w-[95px]">
+                        {/* 1. Wholesale Cost Price Box - ALWAYS VISIBLE */}
+                        <div className="bg-slate-100 border border-slate-300/80 rounded-lg px-2.5 py-1 text-right min-w-[95px] shrink-0">
                           <div className="text-[10px] text-slate-600 font-bold">
                             سعر تكلفة الجملة:
                           </div>
@@ -657,9 +786,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         </div>
 
-                        {/* 2. Wholesale Selling Price Box - VISIBLE ONLY IF WHOLESALE IS ENABLED (سعر بيع الجملة يختفي عند الإخفاء) */}
+                        {/* 2. Wholesale Selling Price Box - VISIBLE ONLY IF WHOLESALE IS ENABLED */}
                         {settings.enableWholesale && (
-                          <div className="bg-amber-50/90 border border-amber-200/90 rounded-lg px-2.5 py-1 text-right min-w-[95px]">
+                          <div className="bg-amber-50/90 border border-amber-200/90 rounded-lg px-2.5 py-1 text-right min-w-[95px] shrink-0">
                             <div className="text-[10px] text-amber-800 font-bold">
                               سعر بيع الجملة:
                             </div>
@@ -669,8 +798,8 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         )}
 
-                        {/* 3. Retail Selling Price Box - ALWAYS VISIBLE (سعر بيع المفرد يظل ظاهراً دائماً) */}
-                        <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-lg px-3 py-1.5 text-right min-w-[105px]">
+                        {/* 3. Retail Selling Price Box - ALWAYS VISIBLE */}
+                        <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-lg px-3 py-1.5 text-right min-w-[105px] shrink-0">
                           <div className="text-[10px] text-emerald-800 font-bold">
                             {settings.enableWholesale ? 'سعر بيع المفرد:' : 'سعر البيع:'}
                           </div>
@@ -681,7 +810,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
                         {/* Direct Quick Add Action Buttons */}
                         {!isOutOfStock ? (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 shrink-0">
                             {settings.enableWholesale ? (
                               <>
                                 <button
@@ -690,7 +819,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                                     e.stopPropagation();
                                     addToCartWithPrice(prod, 'retail');
                                   }}
-                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
                                   title="إضافة بسعر البيع المفرد"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
@@ -703,7 +832,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                                     e.stopPropagation();
                                     addToCartWithPrice(prod, 'wholesale');
                                   }}
-                                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
                                   title="إضافة بسعر بيع الجملة"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
@@ -717,7 +846,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                                   e.stopPropagation();
                                   addToCartWithPrice(prod, 'retail');
                                 }}
-                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
                                 title="إضافة المادة للقائمة بسعر المفرد"
                               >
                                 <Plus className="w-3.5 h-3.5" />
@@ -726,7 +855,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded">
+                          <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded shrink-0">
                             غير متوفر
                           </span>
                         )}
@@ -766,7 +895,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
         {/* Left Column (in RTL): Invoice Builder & Cart: Visible on Desktop OR when mobileTab === 'cart' */}
         {(!isMobileMode || mobileTab === 'cart') && (
-          <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-5'} flex flex-col gap-4`}>
+          <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-5 md:sticky md:top-4'} flex flex-col gap-4`}>
             
             {/* Mobile Back Button to return to products catalog */}
             {isMobileMode && (
@@ -851,7 +980,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           </div>
 
           {/* Cart Items Table */}
-          <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[380px]">
+          <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[520px] lg:max-h-[calc(100vh-320px)]">
             {cartItems.length === 0 ? (
               <div className="h-44 flex flex-col items-center justify-center text-slate-400 text-center">
                 <ShoppingCart className="w-10 h-10 mb-2 stroke-1 text-slate-300" />
@@ -862,50 +991,92 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               <div className="space-y-2">
                 {cartItems.map((item) => {
                   const itemProfit = (item.unitPrice - item.costPrice) * item.quantity;
+                  const cartonCapacity = item.piecesPerCarton || 1;
+                  const isCarton = item.unitType === 'carton';
+
                   return (
                     <div
                       key={item.productId}
                       className="bg-slate-50 border border-slate-200/90 rounded-lg p-2.5 flex flex-col gap-2"
                     >
-                      {/* Line 1: Item Name, Price selector, remove */}
-                      <div className="flex items-start justify-between gap-2">
+                      {/* Line 1: Item Name, Unit Selector (قطعة أم كرتون), Price selector, Remove */}
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div>
                           <div className="text-xs font-bold text-slate-900 leading-snug">
                             {item.productName}
                           </div>
-                          <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                            <span>الوحدة: {item.unit}</span>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <span>الوحدة الأساسية: {item.unit}</span>
                             <span>·</span>
                             <span className="text-emerald-700 font-medium">
-                              تكلفة الجملة: {formatMoney(item.costPrice)}
+                              تكلفة: {formatMoney(item.costPrice)}
                             </span>
+                            {isCarton && (
+                              <span className="text-amber-800 font-bold bg-amber-100/90 px-1.5 py-0.2 rounded text-[10px]">
+                                (كرتون = {cartonCapacity} قطعة)
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Price Type button - only shown if wholesale mode is enabled */}
-                        <div className="flex items-center gap-1">
+                        {/* Controls: Unit selector (قطعة / كرتون) + Price Type selector + Remove */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          
+                          {/* زر صغير لاختيار إذا كانت الوحدة قطعة أم كرتون */}
+                          <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-md border border-slate-300 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => toggleItemUnitType(item.productId, 'piece')}
+                              className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-0.5 ${
+                                !isCarton
+                                  ? 'bg-white text-emerald-800 shadow-2xs font-extrabold'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                              title="بيع بالقطعة"
+                            >
+                              <span>قطعة</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleItemUnitType(item.productId, 'carton')}
+                              className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
+                                isCarton
+                                  ? 'bg-amber-600 text-white shadow-2xs font-extrabold'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                              title={`بيع بالكرتون (${cartonCapacity} قطعة)`}
+                            >
+                              <Box className="w-3 h-3" />
+                              <span>كرتون</span>
+                            </button>
+                          </div>
+
+                          {/* Price Type button - only shown if wholesale mode is enabled */}
                           {settings.enableWholesale && (
                             <button
+                              type="button"
                               onClick={() =>
                                 toggleItemPriceType(
                                   item.productId,
                                   item.priceType === 'retail' ? 'wholesale' : 'retail'
                                 )
                               }
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition ${
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition cursor-pointer ${
                                 item.priceType === 'wholesale'
                                   ? 'bg-amber-100 text-amber-900 border-amber-300'
                                   : 'bg-slate-200 text-slate-800 border-slate-300'
                               }`}
                               title="انقر للتبديل بين سعر التجزئة وسعر الجملة لهذه المادة"
                             >
-                              {item.priceType === 'wholesale' ? 'سعر جملة' : 'سعر تجزئة'}
+                              {item.priceType === 'wholesale' ? 'جملة' : 'مفرد'}
                             </button>
                           )}
 
+                          {/* Delete Item */}
                           <button
+                            type="button"
                             onClick={() => removeFromCart(item.productId)}
-                            className="p-1 text-slate-400 hover:text-rose-600 transition"
+                            className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded hover:bg-rose-50"
                             title="حذف المادة من القائمة"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -916,28 +1087,41 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                       {/* Line 2: Quantity buttons, Unit price, Total */}
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
                         {/* Quantity Counter */}
-                        <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
-                          <button
-                            onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                            className="p-1 hover:bg-slate-100 text-slate-600 transition"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              updateQuantity(item.productId, parseInt(e.target.value) || 1)
-                            }
-                            className="w-12 text-center text-xs font-bold py-0.5 border-x border-slate-200 focus:outline-none"
-                          />
-                          <button
-                            onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                            className="p-1 hover:bg-slate-100 text-slate-600 transition"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                              className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) =>
+                                updateQuantity(item.productId, parseInt(e.target.value) || 1)
+                              }
+                              className="w-12 text-center text-xs font-bold py-0.5 border-x border-slate-200 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                              className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+
+                          <span className="text-[11px] font-bold text-slate-700">
+                            {isCarton ? 'كرتون' : item.unit || 'قطعة'}
+                          </span>
+                          {isCarton && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              (= {item.deductedPieces || item.quantity * cartonCapacity} قطعة)
+                            </span>
+                          )}
                         </div>
 
                         {/* Price calculation */}
@@ -1433,6 +1617,159 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             </button>
           </div>
         </div>
+
+      </div>
+    </div>
+  )}
+
+  {/* Quick Price Edit Modal (تعديل السعر المباشر من جهة البحث عن المواد) */}
+  {productForPriceEdit && (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+        
+        {/* Header */}
+        <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+              <Pencil className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">تعديل سعر المادة</h3>
+              <p className="text-[11px] text-blue-700 font-medium">
+                #{productForPriceEdit.code} · {productForPriceEdit.name}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setProductForPriceEdit(null)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-blue-100 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSavePriceEdit} className="p-5 space-y-4">
+          {/* Retail Selling Price (سعر بيع المفرد) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              سعر بيع المفرد ({settings.currency}) <span className="text-emerald-600 font-bold">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                required
+                value={editRetailPrice}
+                onChange={(e) => setEditRetailPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                {settings.currency}
+              </span>
+            </div>
+          </div>
+
+          {/* Wholesale Selling Price (سعر بيع الجملة) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              سعر بيع الجملة ({settings.currency})
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={editWholesalePrice}
+                onChange={(e) => setEditWholesalePrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                {settings.currency}
+              </span>
+            </div>
+          </div>
+
+          {/* Cost Price (سعر الشراء / التكلفة) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              سعر الشراء / التكلفة ({settings.currency})
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={editCostPrice}
+                onChange={(e) => setEditCostPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                {settings.currency}
+              </span>
+            </div>
+          </div>
+
+          {/* Carton capacity (عدد القطع في الكرتون) */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              سعة الكرتون الواحد (كم قطعة بالكرتون):
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                value={editPiecesPerCarton}
+                onChange={(e) => setEditPiecesPerCarton(e.target.value === '' ? '' : parseInt(e.target.value) || 1)}
+                className="w-24 px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+              />
+              <span className="text-xs text-slate-500 font-semibold">قطعة لكل كرتون</span>
+            </div>
+            {typeof editPiecesPerCarton === 'number' && editPiecesPerCarton > 1 && typeof editRetailPrice === 'number' && (
+              <div className="text-[11px] text-slate-600 mt-2 font-medium">
+                💡 سعر الكرتون المفرد = <span className="font-bold text-slate-900">{formatMoney(editRetailPrice * editPiecesPerCarton)}</span>
+                {typeof editWholesalePrice === 'number' && (
+                  <> · جملة = <span className="font-bold text-slate-900">{formatMoney(editWholesalePrice * editPiecesPerCarton)}</span></>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+            {onEditProduct && (
+              <button
+                type="button"
+                onClick={() => {
+                  const prod = productForPriceEdit;
+                  setProductForPriceEdit(null);
+                  onEditProduct(prod);
+                }}
+                className="text-xs text-blue-700 hover:text-blue-900 underline font-semibold cursor-pointer"
+              >
+                تعديل كامل بيانات المادة
+              </button>
+            )}
+            <div className="flex items-center gap-2 mr-auto">
+              <button
+                type="button"
+                onClick={() => setProductForPriceEdit(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>حفظ السعر</span>
+              </button>
+            </div>
+          </div>
+        </form>
 
       </div>
     </div>

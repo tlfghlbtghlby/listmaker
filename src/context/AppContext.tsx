@@ -14,7 +14,9 @@ import {
   logoutAccount, 
   saveStoreDataToCloud, 
   loadStoreDataFromCloud,
+  subscribeToStoreData,
   getLocalStoreData,
+  setLocalStoreData,
   createInitialEmptySettings
 } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -59,6 +61,8 @@ interface AppContextType {
   isCloudConnected: boolean;
   isSyncing: boolean;
   lastSyncTime: string | null;
+  syncNotice: string | null;
+  setSyncNotice: (msg: string | null) => void;
   syncNow: () => Promise<void>;
   loginUser: (user: any) => Promise<void>;
   logout: () => Promise<void>;
@@ -93,30 +97,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // Manual & Automatic instant two-way sync (<50ms)
+  // Full real two-way synchronization: Pulls freshest cloud data, updates state, seeds changes
   const syncNow = async () => {
     if (!currentUser) return;
     setIsSyncing(true);
+    setSyncNotice(null);
 
     try {
-      // 1. Push local changes and pull server changes in parallel for instant execution
-      const savePromise = saveStoreDataToCloud(currentUser.uid, {
-        products,
-        invoices,
-        customers,
-        settings
-      });
-      const serverDataPromise = loadStoreDataFromCloud(currentUser.uid);
-
-      const [, serverData] = await Promise.all([savePromise, serverDataPromise]);
+      // 1. Fetch latest data directly from the Cloud (Firestore / Server database)
+      const serverData = await loadStoreDataFromCloud(currentUser.uid);
 
       if (serverData) {
+        let updatedProductsCount = 0;
+        let updatedInvoicesCount = 0;
+
         if (Array.isArray(serverData.products)) {
           setProducts(serverData.products);
+          updatedProductsCount = serverData.products.length;
         }
         if (Array.isArray(serverData.invoices)) {
           setInvoices(serverData.invoices);
+          updatedInvoicesCount = serverData.invoices.length;
         }
         if (Array.isArray(serverData.customers)) {
           setCustomers(serverData.customers);
@@ -124,14 +127,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (serverData.settings) {
           setSettings(serverData.settings);
         }
-      }
 
-      setIsCloudConnected(true);
-      const now = new Date();
-      setLastSyncTime(now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        // Keep local persistent backup updated
+        setLocalStoreData(currentUser.uid, serverData);
+        try {
+          localStorage.setItem(`store_backup_${currentUser.uid}`, JSON.stringify(serverData));
+        } catch (e) {}
+
+        setIsCloudConnected(true);
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(timeStr);
+
+        setSyncNotice(`تمت المزامنة بنجاح: تم تحديث وتزامن ${updatedProductsCount} مادة و ${updatedInvoicesCount} قائمة مبيعات كأنما تم تحديث الصفحة`);
+        setTimeout(() => setSyncNotice(null), 4500);
+      } else {
+        // If server had no data yet, push local data to seed the cloud
+        await saveStoreDataToCloud(currentUser.uid, {
+          products,
+          invoices,
+          customers,
+          settings
+        });
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastSyncTime(timeStr);
+        setIsCloudConnected(true);
+        setSyncNotice('تمت مزامنة ورفع كافة المواد والبيانات إلى السحابة بنجاح');
+        setTimeout(() => setSyncNotice(null), 4500);
+      }
     } catch (err) {
       console.warn("Manual sync notice:", err);
       setIsCloudConnected(false);
+      setSyncNotice('تعذر الاتصال بالسحابة للمزامنة. يرجى التحقق من اتصال الإنترنت.');
+      setTimeout(() => setSyncNotice(null), 5000);
     } finally {
       setIsSyncing(false);
     }
@@ -157,6 +186,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Ref to track whether initial store data has fully loaded for currentUser before auto-save is enabled
   const isLoadedForUserRef = React.useRef<string | null>(null);
 
+  // Real-time Cloud Cross-Device Synchronization (Laptop, Phone, Tablets update instantly!)
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = subscribeToStoreData(currentUser.uid, (cloudData) => {
+      // Only apply incoming cloud changes if initial data has loaded for this user
+      if (cloudData && isLoadedForUserRef.current === currentUser.uid) {
+        if (Array.isArray(cloudData.products) && cloudData.products.length > 0) {
+          setProducts(cloudData.products);
+        }
+        if (Array.isArray(cloudData.invoices)) {
+          setInvoices(cloudData.invoices);
+        }
+        if (Array.isArray(cloudData.customers)) {
+          setCustomers(cloudData.customers);
+        }
+        if (cloudData.settings) {
+          setSettings(cloudData.settings);
+        }
+        setIsCloudConnected(true);
+        const now = new Date();
+        setLastSyncTime(now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
   // Directly login and immediately load user's store data without waiting or race conditions
   const loginUser = async (user: any) => {
     if (!user || !user.uid) return;
@@ -169,8 +224,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem('last_active_user_uid', user.uid);
     } catch (e) {}
 
-    // 1. Immediately read local cached data for instant display (0ms)
-    const localCached = getLocalStoreData(user.uid);
+    // 1. Immediately read local cached data or backup for instant display (0ms)
+    let localCached = getLocalStoreData(user.uid);
+    if (!localCached) {
+      try {
+        const backupRaw = localStorage.getItem(`store_backup_${user.uid}`);
+        if (backupRaw) localCached = JSON.parse(backupRaw);
+      } catch (e) {}
+    }
+
     let loadedProducts = localCached && Array.isArray(localCached.products) ? localCached.products : [];
     let loadedInvoices = localCached && Array.isArray(localCached.invoices) ? localCached.invoices : [];
     let loadedCustomers = localCached && Array.isArray(localCached.customers) ? localCached.customers : [];
@@ -509,13 +571,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 4. Sign out
   const logout = async () => {
     isLoadedForUserRef.current = null; // Disable auto-save immediately before clearing state!
-    if (currentUser && products.length > 0) {
-      saveStoreDataToCloud(currentUser.uid, {
-        products,
-        invoices,
-        customers,
-        settings
-      });
+    if (currentUser) {
+      try {
+        await saveStoreDataToCloud(currentUser.uid, {
+          products,
+          invoices,
+          customers,
+          settings
+        });
+        localStorage.setItem(`store_backup_${currentUser.uid}`, JSON.stringify({
+          products,
+          invoices,
+          customers,
+          settings
+        }));
+      } catch (e) {
+        console.warn("Failed to flush store data on logout:", e);
+      }
     }
 
     // Immediately clear in-memory state so nothing leaks to unauthenticated screen
@@ -571,6 +643,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isCloudConnected,
         isSyncing,
         lastSyncTime,
+        syncNotice,
+        setSyncNotice,
         syncNow,
         loginUser,
         logout,

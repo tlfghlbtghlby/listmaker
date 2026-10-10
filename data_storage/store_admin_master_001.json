@@ -1,6 +1,38 @@
 {
   "products": [
     {
+      "name": "كلينس",
+      "code": "6931149446227",
+      "category": "عام",
+      "unit": "قطعة",
+      "costPrice": 833.33,
+      "retailPrice": 10000,
+      "wholesalePrice": 10000,
+      "stock": 60,
+      "piecesPerCarton": 12,
+      "minStock": 6,
+      "notes": "",
+      "id": "prod_1791615993290_kleenex",
+      "createdAt": "2026-10-10T07:00:00.000Z",
+      "updatedAt": "2026-10-10T07:00:00.000Z"
+    },
+    {
+      "name": "كدد",
+      "code": "1002",
+      "category": "عام",
+      "unit": "قطعة",
+      "costPrice": 8.33,
+      "retailPrice": 8.25,
+      "wholesalePrice": 8.25,
+      "stock": 59,
+      "piecesPerCarton": 12,
+      "minStock": 6,
+      "notes": "",
+      "id": "prod_1791615993290_mfrj",
+      "createdAt": "2026-10-10T07:06:33.290Z",
+      "updatedAt": "2026-10-10T07:06:42.460Z"
+    },
+    {
       "name": "...",
       "code": "1001",
       "category": "مواد غذائية",

@@ -1,20 +1,25 @@
 import React, { useState, useRef, Suspense } from 'react';
 import { useApp } from '../context/AppContext';
 import { ADMIN_EMAIL } from '../types';
+import { changeAccountPassword } from '../firebase';
 import { 
   Settings, 
   Store, 
   FileText, 
   Download, 
   Upload, 
-  RotateCcw, 
   Check, 
   AlertTriangle,
   Cloud,
   LogOut,
   Trash2,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Lock,
+  CheckCircle2
 } from 'lucide-react';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
@@ -36,7 +41,6 @@ export const SettingsView: React.FC = () => {
     updateSettings, 
     exportDataJSON, 
     importDataJSON, 
-    resetToDemo,
     resetToZero,
     currentUser,
     logout
@@ -54,6 +58,16 @@ export const SettingsView: React.FC = () => {
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  // Password change state
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,6 +88,50 @@ export const SettingsView: React.FC = () => {
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordFeedback(null);
+
+    if (!oldPassword.trim()) {
+      setPasswordFeedback({ type: 'error', message: 'يرجى إدخال كلمة المرور القديمة' });
+      return;
+    }
+    if (!newPassword.trim()) {
+      setPasswordFeedback({ type: 'error', message: 'يرجى إدخال كلمة المرور الجديدة' });
+      return;
+    }
+    if (newPassword.trim().length < 6) {
+      setPasswordFeedback({ type: 'error', message: 'يجب ألا تقل كلمة المرور الجديدة عن 6 خانات' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordFeedback({ type: 'error', message: 'كلمة المرور الجديدة غير متطابقة مع التأكيد' });
+      return;
+    }
+    if (!currentUser) {
+      setPasswordFeedback({ type: 'error', message: 'يجب تسجيل الدخول لتغيير كلمة المرور' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await changeAccountPassword(currentUser.uid, oldPassword.trim(), newPassword.trim());
+      if (res.success) {
+        setPasswordFeedback({ type: 'success', message: res.message || 'تم حفظ وتحديث كلمة المرور الجديدة بنجاح!' });
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => setPasswordFeedback(null), 5000);
+      } else {
+        setPasswordFeedback({ type: 'error', message: res.error || 'فشل تحديث كلمة المرور' });
+      }
+    } catch (err: any) {
+      setPasswordFeedback({ type: 'error', message: err.message || 'حدث خطأ أثناء تغيير كلمة المرور' });
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const handleDownloadBackup = () => {
@@ -104,13 +162,6 @@ export const SettingsView: React.FC = () => {
     };
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleReset = () => {
-    if (confirm('هل أنت متأكد من استعادة البيانات النموذجية الأولية؟ سيتم مسح التغييرات الحالية غير المحفوظة.')) {
-      resetToDemo();
-      alert('تمت إعادة ضبط البيانات النموذجية بنجاح.');
-    }
   };
 
   return (
@@ -451,6 +502,147 @@ export const SettingsView: React.FC = () => {
 
       </div>
 
+      {/* Password Change Section (تغيير كلمة المرور) */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center shadow-2xs">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-slate-900">تغيير كلمة المرور / رمز الحساب</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                أدخل كلمة المرور القديمة الحالية، ثم أدخل كلمة المرور الجديدة لحفظها فوراً
+              </p>
+            </div>
+          </div>
+          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
+            {currentUser?.displayName || currentUser?.email || 'حساب نشط'}
+          </span>
+        </div>
+
+        {passwordFeedback && (
+          <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border shadow-2xs ${
+            passwordFeedback.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+              : 'bg-rose-50 text-rose-800 border-rose-300'
+          }`}>
+            {passwordFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{passwordFeedback.message}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
+          {/* Old Password */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              كلمة المرور القديمة (الحالية) <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type={showOldPassword ? 'text' : 'password'}
+                required
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="أدخل كلمة المرور القديمة..."
+                className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50/50"
+                dir="ltr"
+              />
+              <button
+                type="button"
+                onClick={() => setShowOldPassword(!showOldPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                title={showOldPassword ? 'إخفاء' : 'إظهار'}
+              >
+                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* New Password */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                كلمة المرور الجديدة <span className="text-emerald-600">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="6 خانات أو أكثر..."
+                  className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title={showNewPassword ? 'إخفاء' : 'إظهار'}
+                >
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Confirm New Password */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                تأكيد كلمة المرور الجديدة <span className="text-emerald-600">*</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="أعد كتابة الجديدة..."
+                  className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title={showConfirmPassword ? 'إخفاء' : 'إظهار'}
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={isChangingPassword}
+              className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer ${
+                isChangingPassword
+                  ? 'bg-amber-700 opacity-80 cursor-wait'
+                  : 'bg-amber-600 hover:bg-amber-700'
+              }`}
+            >
+              {isChangingPassword ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>جاري الحفظ والتحقق...</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>حفظ كلمة المرور الجديدة</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Backup & Data Management */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
         <div>
@@ -467,7 +659,7 @@ export const SettingsView: React.FC = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           
           {/* Export JSON */}
           <button
@@ -507,22 +699,6 @@ export const SettingsView: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* Reset Demo */}
-          <button
-            onClick={handleReset}
-            className="p-4 rounded-xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/30 text-right flex flex-col justify-between transition group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-700 flex items-center justify-center mb-2 group-hover:bg-rose-600 group-hover:text-white transition">
-              <RotateCcw className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="font-bold text-sm text-slate-900">استعادة البيانات النموذجية</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                إعادة ضبط المواد والقوائم للتجربة
-              </div>
-            </div>
-          </button>
 
         </div>
       </div>

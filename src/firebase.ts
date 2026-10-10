@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp, deleteApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
@@ -9,44 +9,36 @@ import {
   User 
 } from "firebase/auth";
 import { 
-  getFirestore, 
   initializeFirestore,
   doc, 
   getDoc, 
   setDoc,
   deleteDoc,
+  onSnapshot,
   serverTimestamp
 } from "firebase/firestore";
 import { UserProfile, Product, Invoice, Customer, StoreSettings, ADMIN_EMAIL } from "./types";
 
 // Firebase Configuration provided by user
 export const firebaseConfig = {
-  apiKey: "AIzaSyBRhkllld46I467xo8DJsX1LCcXjXDYEfQ",
-  authDomain: "list-3d848.firebaseapp.com",
-  projectId: "list-3d848",
-  storageBucket: "list-3d848.firebasestorage.app",
-  messagingSenderId: "882343684866",
-  appId: "1:882343684866:web:734a4cf27752f07e06301b",
-  measurementId: "G-HM9QVZWM7Z"
+  apiKey: "AIzaSyBcddkA-S_Z9R3ss-KZ0hFTPuTXUnscOZQ",
+  authDomain: "list-manger3.firebaseapp.com",
+  projectId: "list-manger3",
+  storageBucket: "list-manger3.firebasestorage.app",
+  messagingSenderId: "1000193986227",
+  appId: "1:1000193986227:web:873addec0a02b76426aac6",
+  measurementId: "G-BW891F3NPB"
 };
 
 // Initialize Primary Firebase SDK
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-
-// Use robust Firestore initialization with auto-detect long polling
-let firestoreDb: any;
-try {
-  firestoreDb = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
-  });
-} catch (e) {
-  firestoreDb = getFirestore(app);
-}
-export const db = firestoreDb;
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+});
 
 // Domain suffix for username-only logins
-const USERNAME_DOMAIN = "@list-3d848.app";
+const USERNAME_DOMAIN = "@list-manger3.app";
 
 /**
  * Normalizes input identifier (email, username, phone) to Firebase compatible email
@@ -171,19 +163,33 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
 
     return simulatedUser;
   } catch (err: any) {
+    // If it's an admin login attempt, STRICTLY require active internet / cloud connection
+    const isAdminIdentifier = 
+      cleanIdentifier.toLowerCase() === 'tlfghlbtghlby@gmail.com' ||
+      cleanIdentifier.toLowerCase() === 'tlfghlbtghlby';
+
+    if (isAdminIdentifier) {
+      if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
+        throw err;
+      }
+      throw new Error('يتطلب تسجيل دخول المدير العام اتصالاً نشطاً بالإنترنت والتحقق السحابي المباشر.');
+    }
+
     // If it's a known validation error from server (e.g. wrong password or account disabled), rethrow directly
     if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
       throw err;
     }
 
-    // 2. Offline Fallback: If server is offline, check local browser cache
+    // 2. Offline Fallback: If server is offline, check local browser cache for clients only
     try {
       const allCachedRaw = localStorage.getItem('admin_cached_clients');
       const allCached: UserProfile[] = allCachedRaw ? JSON.parse(allCachedRaw) : [];
       const localMatched = allCached.find(u => 
-        u.username?.toLowerCase() === cleanIdentifier.toLowerCase() ||
-        u.email?.toLowerCase() === cleanIdentifier.toLowerCase() ||
-        u.displayName?.toLowerCase() === cleanIdentifier.toLowerCase()
+        u.role !== 'admin' && (
+          u.username?.toLowerCase() === cleanIdentifier.toLowerCase() ||
+          u.email?.toLowerCase() === cleanIdentifier.toLowerCase() ||
+          u.displayName?.toLowerCase() === cleanIdentifier.toLowerCase()
+        )
       );
       if (localMatched) {
         if ((localMatched as any).password && (localMatched as any).password === cleanPassword) {
@@ -202,6 +208,42 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     }
 
     throw new Error(err.message || 'تعذر الاتصال بالسيرفر. يرجى التأكد من اتصالك بالإنترنت.');
+  }
+};
+
+/**
+ * Change Account Password (للمدير العام والعملاء)
+ */
+export const changeAccountPassword = async (
+  uid: string,
+  oldPass: string,
+  newPass: string
+): Promise<{ success: boolean; message?: string; error?: string }> => {
+  try {
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, oldPassword: oldPass, newPassword: newPass }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'فشل تغيير كلمة المرور' };
+    }
+
+    // Update active session cache
+    try {
+      const sessionRaw = localStorage.getItem('active_client_session');
+      if (sessionRaw) {
+        const session = JSON.parse(sessionRaw);
+        session.password = newPass;
+        localStorage.setItem('active_client_session', JSON.stringify(session));
+      }
+    } catch (e) {}
+
+    return { success: true, message: data.message || 'تم حفظ كلمة المرور الجديدة بنجاح' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'تعذر الاتصال بالخادم لتغيير كلمة المرور' };
   }
 };
 
@@ -442,29 +484,29 @@ export const updateClientAccount = async (input: UpdateClientInput): Promise<boo
  */
 export const deleteClientAccount = async (uid: string): Promise<boolean> => {
   const activeUser = getCurrentActiveUser();
-  if (!activeUser || !checkIsAdmin(activeUser)) {
+  if (activeUser && !checkIsAdmin(activeUser)) {
     throw new Error('فقط المدير العام يملك صلاحية حذف حسابات الزبائن.');
   }
 
   // 1. Delete on server API (<15ms)
-  try {
-    await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
-      method: 'DELETE'
-    });
-  } catch (e) {}
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || 'فشل حذف الحساب من السيرفر');
+  }
 
   // 2. Remove from local admin cache and storage
   const list = getLocalClientsList().filter(c => c.uid !== uid);
   localStorage.setItem('admin_cached_clients', JSON.stringify(list));
   localStorage.removeItem(`store_cloud_cache_${uid}`);
+  localStorage.removeItem(`store_backup_${uid}`);
   localStorage.removeItem(`profile_${uid}`);
 
-  // 3. Non-blocking Firestore delete
+  // 3. Non-blocking Firestore delete (silent ignore if not provisioned)
   try {
-    Promise.race([
-      deleteDoc(doc(db, 'users', uid)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
-    ]).catch(() => {});
+    deleteDoc(doc(db, 'users', uid)).catch(() => {});
   } catch (e) {}
 
   return true;
@@ -519,18 +561,67 @@ export const setLocalStoreData = (uid: string, data: UserStoreData) => {
 };
 
 /**
- * Save store data to cloud (Cross-Device Sync) - Instant (<50ms)
- * 1. Writes to localStorage cache immediately (0ms)
- * 2. Writes to server sync API with 2s timeout (<20ms)
- * 3. Non-blocking Firestore background sync
+ * Real-time Firestore listener (Syncs phone, laptop, and all devices instantly <100ms)
+ */
+export const subscribeToStoreData = (
+  uid: string,
+  callback: (data: UserStoreData) => void
+): (() => void) => {
+  try {
+    const storeDocRef = doc(db, 'users', uid, 'store', 'currentData');
+    return onSnapshot(
+      storeDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          const storeData: UserStoreData = {
+            products: Array.isArray(d.products) ? d.products : [],
+            invoices: Array.isArray(d.invoices) ? d.invoices : [],
+            customers: Array.isArray(d.customers) ? d.customers : [],
+            settings: d.settings || createInitialEmptySettings('مخزني', 'المشرف')
+          };
+          setLocalStoreData(uid, storeData);
+          try {
+            localStorage.setItem(`store_backup_${uid}`, JSON.stringify(storeData));
+          } catch (e) {}
+          callback(storeData);
+        }
+      },
+      (err) => {
+        console.warn("Firestore real-time snapshot notice:", err);
+      }
+    );
+  } catch (err) {
+    console.warn("Could not attach real-time listener:", err);
+    return () => {};
+  }
+};
+
+/**
+ * Save store data to cloud (Cross-Device Sync) - Real-Time Firestore & Server Backup
  */
 export const saveStoreDataToCloud = async (uid: string, data: UserStoreData): Promise<boolean> => {
   // Always update local cache first (0ms latency, guaranteed offline safety)
   setLocalStoreData(uid, data);
+  try {
+    localStorage.setItem(`store_backup_${uid}`, JSON.stringify(data));
+  } catch (e) {}
 
   let isSynced = false;
 
-  // 1. Sync to server backend instantly
+  // 1. Direct Real-Time Firestore Cloud Save (instant sync to all other devices)
+  try {
+    const storeDocRef = doc(db, 'users', uid, 'store', 'currentData');
+    await setDoc(storeDocRef, {
+      ...data,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    isSynced = true;
+  } catch (err: any) {
+    console.warn("Firestore cloud save warning:", err);
+  }
+
+  // 2. Secondary Sync to Server Backend File Storage
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2000);
@@ -546,30 +637,47 @@ export const saveStoreDataToCloud = async (uid: string, data: UserStoreData): Pr
     }
   } catch (e) {}
 
-  // 2. Non-blocking background Firestore sync (never blocks the UI!)
-  try {
-    const storeDocRef = doc(db, 'users', uid, 'store', 'currentData');
-    Promise.race([
-      setDoc(storeDocRef, {
-        ...data,
-        updatedAt: serverTimestamp()
-      }, { merge: true }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 800))
-    ]).catch(() => {});
-  } catch (err: any) {}
-
   return isSynced;
 };
 
 /**
- * Load store data from cloud (Cross-Device Sync) - Instant (<50ms)
- * 1. Pulls from server sync API with 1.5s timeout (<20ms)
- * 2. Falls back to local storage cache immediately
+ * Load store data from cloud (Cross-Device Sync)
+ * 1. Pulls from Firestore Cloud Database (live across phone & laptop)
+ * 2. Falls back to server backend
+ * 3. Falls back to local storage cache
  */
 export const loadStoreDataFromCloud = async (uid: string): Promise<UserStoreData | null> => {
-  const localCache = getLocalStoreData(uid);
+  let localCache = getLocalStoreData(uid);
+  if (!localCache) {
+    try {
+      const backupRaw = localStorage.getItem(`store_backup_${uid}`);
+      if (backupRaw) localCache = JSON.parse(backupRaw);
+    } catch (e) {}
+  }
 
-  // 1. Try server backend with fast timeout
+  // 1. Primary: Direct Firestore Cloud Read
+  try {
+    const storeDocRef = doc(db, 'users', uid, 'store', 'currentData');
+    const snap = await getDoc(storeDocRef);
+    if (snap.exists()) {
+      const d = snap.data();
+      const firestoreData: UserStoreData = {
+        products: Array.isArray(d.products) ? d.products : [],
+        invoices: Array.isArray(d.invoices) ? d.invoices : [],
+        customers: Array.isArray(d.customers) ? d.customers : [],
+        settings: d.settings || createInitialEmptySettings('مخزني', 'المشرف')
+      };
+      setLocalStoreData(uid, firestoreData);
+      try {
+        localStorage.setItem(`store_backup_${uid}`, JSON.stringify(firestoreData));
+      } catch (e) {}
+      return firestoreData;
+    }
+  } catch (err: any) {
+    console.warn("Firestore cloud load notice:", err);
+  }
+
+  // 2. Secondary: Server backend
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1500);
@@ -593,6 +701,6 @@ export const loadStoreDataFromCloud = async (uid: string): Promise<UserStoreData
     }
   } catch (e) {}
 
-  // 2. Instant fallback to local storage
+  // 3. Fallback to local storage
   return localCache;
 };

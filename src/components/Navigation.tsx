@@ -62,7 +62,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
   ];
 
   return (
-    <nav className="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-xs">
+    <nav className="no-print bg-white border-b border-slate-200 sticky top-0 z-20 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center space-x-1 space-x-reverse overflow-x-auto py-2 scrollbar-none">
           {navItems.map((item) => {

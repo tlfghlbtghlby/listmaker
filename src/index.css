@@ -24,10 +24,25 @@
 
 /* Print Styles */
 @media print {
-  .no-print, .no-print * {
+  /* 1. Eliminate all application screens, headers, navs, and background modals from layout (0px height) */
+  .no-print,
+  .no-print *,
+  header,
+  nav,
+  main,
+  footer {
     display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 
+  /* 2. Reset html, body, and root containers so document flow starts at top 0 */
   html, body {
     background: #ffffff !important;
     color: #000000 !important;
@@ -35,25 +50,43 @@
     padding: 0 !important;
     width: 100% !important;
     height: auto !important;
-    min-height: 100% !important;
+    min-height: 0 !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  /* Unconstrain modal overlay and container so printed pages are never clipped */
+  #root,
+  #root > div {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    background: transparent !important;
+  }
+
+  /* 3. Strip all modal overlay bounds and scroll offsets */
   .print-modal-overlay {
     position: static !important;
+    inset: auto !important;
     background: transparent !important;
     padding: 0 !important;
     margin: 0 !important;
     overflow: visible !important;
     height: auto !important;
+    min-height: 0 !important;
     max-height: none !important;
     display: block !important;
+    width: 100% !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   .print-modal-card {
+    position: static !important;
     border: none !important;
     box-shadow: none !important;
     max-height: none !important;
@@ -63,35 +96,49 @@
     padding: 0 !important;
     margin: 0 !important;
     display: block !important;
+    background: transparent !important;
+    height: auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
   }
 
-  body * {
-    visibility: hidden;
+  /* The inner scroll container around #printable-invoice */
+  .print-modal-card > div:not(.no-print) {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    width: 100% !important;
   }
 
-  #printable-invoice, #printable-invoice * {
-    visibility: visible !important;
-    letter-spacing: normal !important;
-    word-spacing: normal !important;
-    font-feature-settings: "liga" 1, "calt" 1 !important;
-  }
-
+  /* 4. Target #printable-invoice directly to begin right at the top of the paper on Page 1 */
   #printable-invoice {
     position: static !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 auto !important;
-    padding: 4mm !important;
+    padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
+    border-radius: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
     overflow: visible !important;
-    page-break-after: avoid;
-    break-after: avoid;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
     font-family: 'Cairo', 'Tajawal', Tahoma, Arial, sans-serif !important;
     direction: rtl !important;
     text-align: right !important;
+  }
+
+  #printable-invoice * {
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+    font-feature-settings: "liga" 1, "calt" 1 !important;
   }
 
   tr, th, td, table, .avoid-break {

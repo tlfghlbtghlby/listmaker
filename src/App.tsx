@@ -90,7 +90,7 @@ const MainContent: React.FC = () => {
       )}
 
       {/* Active Tab View */}
-      <main className={`flex-1 w-full mx-auto ${
+      <main className={`no-print flex-1 w-full mx-auto ${
         isMobile 
           ? 'max-w-2xl px-2.5 sm:px-4 py-3 sm:py-4' 
           : isFullComputerMode 
@@ -189,6 +189,7 @@ const MainContent: React.FC = () => {
           <POSView
             onInvoiceCreated={handleInvoiceCreated}
             onOpenNewProduct={handleOpenNewProduct}
+            onEditProduct={handleOpenEditProduct}
             onOpenSettings={() => setActiveTab('settings')}
           />
         )}

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 interface AuthViewProps {
-  onSuccess: () => void;
+  onSuccess?: () => void;
   onContinueAsGuest?: () => void;
 }
 
@@ -27,16 +27,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    setSuccessMessage(null);
 
     const targetIdentifier = identifier.trim();
     if (!targetIdentifier) {
-      setErrorMessage('يرجى إدخال اسم المستخدم أو رقم الهاتف أو اسم المحل');
+      setErrorMessage('يرجى إدخال اسم المستخدم أو رقم الهاتف أو البريد الإلكتروني');
       return;
     }
     if (!password) {
@@ -50,10 +48,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
       if (loginUser && loggedInUser) {
         await loginUser(loggedInUser);
       }
-      setSuccessMessage('تم تسجيل الدخول بنجاح! جاري تحميل بياناتك ومزامنتها...');
-      setTimeout(() => {
+      if (onSuccess) {
         onSuccess();
-      }, 300);
+      }
     } catch (err: any) {
       console.warn("Login attempt notice:", err?.message || err);
       let msg = err.message || 'بيانات الدخول غير صحيحة. يرجى التحقق من اسم المستخدم وكلمة المرور.';
@@ -117,20 +114,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
             </div>
           )}
 
-          {successMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
           {/* Login Form: Supports Username, Phone, Store Name, or Email */}
           <form onSubmit={handleLogin} className="space-y-4">
             
             {/* Input 1: Identifier */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                اسم المستخدم / رقم الهاتف / اسم المحل
+                اسم المستخدم / البريد الإلكتروني / رقم الهاتف
               </label>
               <div className="relative">
                 <User className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
@@ -138,7 +128,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
                   type="text"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="مثال: muntazar أو 07740193906 أو انشائية المسعودي"
+                  placeholder="أدخل اسم المستخدم أو البريد"
                   required
                   autoFocus
                   className="w-full pl-3 pr-10 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
@@ -177,7 +167,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer mt-1"
+              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer mt-2"
             >
               {isLoading ? (
                 <>
@@ -191,59 +181,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
                 </>
               )}
             </button>
-
-            {/* Quick Demo Credentials */}
-            <div className="pt-2 flex flex-wrap items-center justify-between gap-1.5 text-xs border-t border-slate-100">
-              <span className="text-slate-400 text-[11px] font-medium">حسابات تجربة سريعة:</span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier('admin');
-                    setPassword('admin');
-                    setErrorMessage(null);
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[11px] transition cursor-pointer"
-                >
-                  المدير (admin)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier('muntazar');
-                    setPassword('19981998');
-                    setErrorMessage(null);
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-bold text-[11px] transition cursor-pointer"
-                >
-                  العميل (muntazar)
-                </button>
-              </div>
-            </div>
           </form>
-
-          {/* Guest / Direct Access Option (Make app available to everyone) */}
-          {onContinueAsGuest && (
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="flex-shrink mx-3 text-slate-400 text-[11px] font-bold">أو للجميع بدون تسجيل</span>
-                <div className="flex-grow border-t border-slate-200"></div>
-              </div>
-
-              <button
-                type="button"
-                onClick={onContinueAsGuest}
-                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-600" />
-                <span>الدخول المباشر واستخدام البرنامج (تجربة النظام / كزائر)</span>
-              </button>
-              <p className="text-[11px] text-center text-slate-400">
-                متاح لأي شخص استخدام جميع وظائف البرنامج وقوائم البيع والمخزن مباشرة.
-              </p>
-            </div>
-          )}
 
         </div>
 

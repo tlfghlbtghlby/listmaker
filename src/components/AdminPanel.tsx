@@ -55,6 +55,10 @@ export const AdminPanel: React.FC = () => {
   const [editIsActive, setEditIsActive] = useState(true);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
+  // Delete modal state (100% in-app, avoids iframe window.confirm blocking)
+  const [clientToDelete, setClientToDelete] = useState<UserProfile | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Password visibility map (default: all passwords visible)
   const [hiddenPasswords, setHiddenPasswords] = useState<Record<string, boolean>>({});
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
@@ -174,35 +178,45 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  const handleDeleteClient = async (client: UserProfile) => {
-    const confirmDelete = window.confirm(
-      `هل أنت متأكد من حذف حساب الزبون (${client.displayName || client.username}) نهائياً؟\n\nتنبيه: سيتم مسح الحساب وبياناته ومخزنه من السيرفر نهائياً.`
-    );
+  const handleDeleteClient = (client: UserProfile) => {
+    // Open in-app confirmation modal (eliminates blocked window.confirm in iframes)
+    setClientToDelete(client);
+  };
 
-    if (!confirmDelete) return;
+  const confirmDeleteClientAction = async () => {
+    if (!clientToDelete) return;
+    setIsDeleting(true);
 
     try {
-      await deleteClientAccount(client.uid);
+      await deleteClientAccount(clientToDelete.uid);
       setFeedback({
         type: 'success',
-        message: `تم حذف حساب الزبون (${client.displayName || client.username}) نهائياً.`
+        message: `تم حذف حساب الزبون (${clientToDelete.displayName || clientToDelete.username}) ومخزنه نهائياً بنجاح.`
       });
-      setClients(prev => prev.filter(c => c.uid !== client.uid));
+      setClients(prev => prev.filter(c => c.uid !== clientToDelete.uid));
+      setClientToDelete(null);
     } catch (err: any) {
       console.error("Error deleting client:", err);
       setFeedback({ type: 'error', message: err.message || 'فشل حذف الحساب' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleToggleStatus = async (client: UserProfile) => {
     const nextStatus = client.isActive === false ? true : false;
-    const confirmMsg = nextStatus 
-      ? `هل تريد تفعيل حساب (${client.displayName})؟`
-      : `هل تريد إيقاف وتعطيل حساب (${client.displayName})؟`;
-    
-    if (window.confirm(confirmMsg)) {
+    try {
       await toggleClientAccountStatus(client.uid, nextStatus);
       setClients(prev => prev.map(c => c.uid === client.uid ? { ...c, isActive: nextStatus } : c));
+      setFeedback({
+        type: 'success',
+        message: `تم ${nextStatus ? 'تفعيل' : 'إيقاف وتعطيل'} حساب (${client.displayName}) بنجاح.`
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'فشل تغيير حالة الحساب'
+      });
     }
   };
 
@@ -549,14 +563,23 @@ export const AdminPanel: React.FC = () => {
                           </button>
 
                           {/* Delete Client Button */}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteClient(client)}
-                            className="p-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/70"
-                            title="حذف الحساب نهائياً من النظام"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {client.role === 'admin' || client.uid === 'admin_master_001' || client.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? (
+                            <span 
+                              className="p-1.5 rounded-lg text-xs font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"
+                              title="حساب المدير العام الرئيسي محمي"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteClient(client)}
+                              className="p-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/70"
+                              title="حذف الحساب نهائياً من النظام ومسح بياناته"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -567,6 +590,73 @@ export const AdminPanel: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation In-App Modal (Works 100% reliably in sandboxed iframes) */}
+      {clientToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">تأكيد حذف الحساب نهائياً</h3>
+                <p className="text-xs text-rose-400 mt-0.5">إجراء نهائي لا يمكن التراجع عنه</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">اسم صاحب الحساب:</span>
+                <span className="text-white font-bold">{clientToDelete.displayName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">اسم الدخول:</span>
+                <span className="text-emerald-400 font-mono font-bold">{clientToDelete.username}</span>
+              </div>
+              {clientToDelete.storeName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">اسم المتجر / المحل:</span>
+                  <span className="text-slate-200">{clientToDelete.storeName}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-rose-950/40 border border-rose-800/60 rounded-xl p-3 text-xs text-rose-200 leading-relaxed">
+              ⚠️ تنبيه: سيتم مسح هذا الحساب ومخزنه وقوائمه وبياناته من السيرفر نهائياً ولن يتمكن الزبون من تسجيل الدخول بعد الآن.
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setClientToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
+              >
+                إلغاء وتراجع
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteClientAction}
+                disabled={isDeleting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>جاري الحذف...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>نعم، احذف الحساب الآن</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Client Account Modal */}
       {editingClient && (

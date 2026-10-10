@@ -137,20 +137,14 @@ app.post('/api/auth/resolve', (req, res) => {
 
     const cleanInput = identifier.trim();
 
-    // Check Admin identifier
-    if (
-      cleanInput.toLowerCase() === 'admin' ||
-      cleanInput.toLowerCase() === 'tlfghlbtghlby@gmail.com' ||
-      cleanInput.toLowerCase() === 'tlfghlbtghlby' ||
-      cleanInput === 'المدير' ||
-      cleanInput === 'المدير العام'
-    ) {
+    // Check Admin identifier (Strictly tlfghlbtghlby@gmail.com only)
+    if (cleanInput.toLowerCase() === 'tlfghlbtghlby@gmail.com' || cleanInput.toLowerCase() === 'tlfghlbtghlby') {
       return res.json({
         success: true,
         user: {
           uid: 'admin_master_001',
           email: 'tlfghlbtghlby@gmail.com',
-          username: 'admin',
+          username: 'tlfghlbtghlby@gmail.com',
           displayName: 'المدير العام',
           storeName: 'لوحة الإدارة المركزية',
           phone: '07700000000',
@@ -218,40 +212,37 @@ app.post('/api/auth/login', (req, res) => {
     const cleanInput = identifier.trim();
     const cleanPass = password.trim();
 
-    // 1. Check Admin login
-    const isAdminIdentifier =
-      cleanInput.toLowerCase() === 'admin' ||
+    // 1. Check Admin login (Secured exclusively in Cloud/Server backend)
+    const isAdminIdentifier = 
       cleanInput.toLowerCase() === 'tlfghlbtghlby@gmail.com' ||
-      cleanInput.toLowerCase() === 'tlfghlbtghlby' ||
-      cleanInput.toLowerCase() === 'ahmed.saleh.ikr@student.atu.edu.iq' ||
-      cleanInput.toLowerCase() === 'ahmed' ||
-      cleanInput === 'المدير' ||
-      cleanInput === 'المدير العام';
+      cleanInput.toLowerCase() === 'tlfghlbtghlby';
 
     if (isAdminIdentifier) {
-      let users: any[] = [];
-      if (fs.existsSync(USERS_FILE)) {
-        users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-      }
-      let adminInDb = users.find((u: any) => u.role === 'admin' || u.email?.toLowerCase() === 'tlfghlbtghlby@gmail.com');
-
-      // Update stored password if new password entered by admin
-      if (adminInDb && cleanPass) {
-        adminInDb.password = cleanPass;
+      const adminCredsPath = path.join(DATA_DIR, 'admin_credentials.json');
+      let validAdminPass = '123456';
+      if (fs.existsSync(adminCredsPath)) {
         try {
-          fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+          const creds = JSON.parse(fs.readFileSync(adminCredsPath, 'utf-8'));
+          if (creds.password) validAdminPass = creds.password;
         } catch (e) {}
+      }
+
+      if (cleanPass !== validAdminPass) {
+        return res.status(401).json({
+          success: false,
+          error: 'كلمة المرور غير صحيحة لحساب المدير العام.'
+        });
       }
 
       return res.json({
         success: true,
         user: {
-          uid: adminInDb?.uid || 'admin_master_001',
+          uid: 'admin_master_001',
           email: 'tlfghlbtghlby@gmail.com',
-          username: 'admin',
-          displayName: adminInDb?.displayName || 'المدير العام',
-          storeName: adminInDb?.storeName || 'لوحة الإدارة المركزية',
-          phone: adminInDb?.phone || '07700000000',
+          username: 'tlfghlbtghlby@gmail.com',
+          displayName: 'المدير العام',
+          storeName: 'لوحة الإدارة المركزية',
+          phone: '07700000000',
           role: 'admin',
           isActive: true,
         }
@@ -313,11 +304,75 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
+// Change Password Endpoint (لتغيير كلمة المرور من الإعدادات للعملاء والمدير)
+app.post('/api/auth/change-password', (req, res) => {
+  try {
+    const { userId, oldPassword, newPassword } = req.body;
+    if (!userId || !oldPassword || !newPassword) {
+      return res.status(400).json({ success: false, error: 'يرجى إدخال جميع الحقول المطلوبة' });
+    }
+    const cleanOld = String(oldPassword).trim();
+    const cleanNew = String(newPassword).trim();
+
+    if (cleanNew.length < 6) {
+      return res.status(400).json({ success: false, error: 'يجب ألا تقل كلمة المرور الجديدة عن 6 خانات' });
+    }
+
+    // 1. If Admin
+    if (userId === 'admin_master_001') {
+      const adminCredsPath = path.join(DATA_DIR, 'admin_credentials.json');
+      let currentAdminPass = '123456';
+      if (fs.existsSync(adminCredsPath)) {
+        try {
+          const creds = JSON.parse(fs.readFileSync(adminCredsPath, 'utf-8'));
+          if (creds.password) currentAdminPass = creds.password;
+        } catch (e) {}
+      }
+
+      if (cleanOld !== currentAdminPass) {
+        return res.status(401).json({ success: false, error: 'كلمة المرور القديمة غير صحيحة' });
+      }
+
+      fs.writeFileSync(adminCredsPath, JSON.stringify({ password: cleanNew, updatedAt: new Date().toISOString() }, null, 2), 'utf-8');
+      return res.json({ success: true, message: 'تم حفظ كلمة المرور الجديدة للمدير العام بنجاح' });
+    }
+
+    // 2. If Client user
+    if (fs.existsSync(USERS_FILE)) {
+      let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+      const userIndex = users.findIndex((u: any) => u.uid === userId);
+      if (userIndex === -1) {
+        return res.status(404).json({ success: false, error: 'تعذر العثور على حساب المستخدم' });
+      }
+
+      if (users[userIndex].password && users[userIndex].password !== cleanOld) {
+        return res.status(401).json({ success: false, error: 'كلمة المرور القديمة غير صحيحة' });
+      }
+
+      users[userIndex].password = cleanNew;
+      users[userIndex].updatedAt = new Date().toISOString();
+      fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+      return res.json({ success: true, message: 'تم حفظ وتحديث كلمة المرور الجديدة بنجاح' });
+    }
+
+    return res.status(404).json({ success: false, error: 'ملف الحسابات غير متوفر' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/admin/users', (req, res) => {
   try {
     if (fs.existsSync(USERS_FILE)) {
       const content = fs.readFileSync(USERS_FILE, 'utf-8');
-      return res.json({ success: true, users: JSON.parse(content) });
+      const allUsers = JSON.parse(content);
+      // Strictly exclude any admin accounts from client lists so it is never displayed or editable by others
+      const clientsOnly = allUsers.filter((u: any) => 
+        u.role !== 'admin' && 
+        u.uid !== 'admin_master_001' && 
+        u.email?.toLowerCase() !== 'tlfghlbtghlby@gmail.com'
+      );
+      return res.json({ success: true, users: clientsOnly });
     }
     return res.json({ success: true, users: [] });
   } catch (err: any) {
@@ -394,9 +449,17 @@ app.put('/api/admin/users/:userId', (req, res) => {
 app.delete('/api/admin/users/:userId', (req, res) => {
   try {
     const { userId } = req.params;
+    const cleanId = (userId || '').trim().toLowerCase();
+    if (cleanId === 'admin_master_001' || cleanId === 'tlfghlbtghlby@gmail.com' || cleanId === 'tlfghlbtghlby') {
+      return res.status(403).json({ success: false, error: 'لا يمكن حذف حساب المدير العام الرئيسي' });
+    }
     if (fs.existsSync(USERS_FILE)) {
       let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-      users = users.filter((u: any) => u.uid !== userId);
+      users = users.filter((u: any) => 
+        u.uid !== userId && 
+        u.email?.toLowerCase() !== cleanId && 
+        u.username?.toLowerCase() !== cleanId
+      );
       fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
 
       // Also clean up client store file if it exists

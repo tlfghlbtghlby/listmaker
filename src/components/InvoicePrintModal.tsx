@@ -275,7 +275,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
           @media print {
             @page {
               size: ${printLayout === 'a4' ? 'A4 portrait' : printLayout === 'a5' ? 'A5 portrait' : '80mm auto'};
-              margin: ${printLayout === 'thermal' ? '2mm' : printLayout === 'a5' ? '5mm' : '8mm'};
+              margin: ${printLayout === 'thermal' ? '2mm' : printLayout === 'a5' ? '4mm' : '5mm'};
             }
             ${printLayout === 'thermal' ? '#printable-invoice { width: 80mm !important; max-width: 80mm !important; }' : ''}
           }
@@ -420,13 +420,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         )}
 
         {/* Invoice Viewer and Printable Container */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/80 flex justify-center">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/80 flex justify-center print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:block">
           
           <div
             id="printable-invoice"
             dir="rtl"
             style={{ letterSpacing: 'normal' }}
-            className={`bg-white shadow-xl text-black mx-auto transition-all ${
+            className={`bg-white shadow-xl text-black mx-auto transition-all print:p-0 print:m-0 print:border-none print:shadow-none print:rounded-none ${
               printLayout === 'thermal'
                 ? 'w-[320px] p-4 rounded-lg border border-slate-400 font-mono text-xs'
                 : printLayout === 'a5'

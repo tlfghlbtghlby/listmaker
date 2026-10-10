@@ -14,7 +14,8 @@ import {
   LogOut,
   LogIn,
   Store,
-  RefreshCw
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -35,7 +36,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
     isCloudConnected,
     syncNow,
     isSyncing,
-    lastSyncTime
+    lastSyncTime,
+    syncNotice,
+    setSyncNotice
   } = useApp();
 
   // Metrics calculations
@@ -50,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
   const isMobile = settings.deviceMode === 'mobile';
 
   return (
-    <header className="bg-slate-900 text-white border-b border-slate-800 shadow-md">
+    <header className="no-print bg-slate-900 text-white border-b border-slate-800 shadow-md">
       <div className="max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3 space-y-3">
         
         {/* Main Row: اسم المحل والتحكم بدون أي تداخل أو قص للكلمات */}
@@ -288,6 +291,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
         </div>
 
       </div>
+
+      {/* Real-time Sync Status Notification Banner */}
+      {syncNotice && (
+        <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between border-t border-emerald-500 shadow-md">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-200 shrink-0 animate-pulse" />
+            <span>{syncNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSyncNotice(null)}
+            className="text-emerald-200 hover:text-white px-2 py-0.5 rounded cursor-pointer text-sm font-black"
+            title="إغلاق التنبيه"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </header>
   );
 };
