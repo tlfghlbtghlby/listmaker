@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Invoice } from '../types';
 import { 
@@ -68,10 +68,42 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const totalRemainingDebt = Math.max(0, grandTotal - paid);
   const currencyLabel = settings.currency || 'دينار';
 
-  // Native Print
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Native Print with absolute top scroll reset
   const handlePrint = () => {
-    window.print();
+    // 1. Reset window and document scroll to top so print engine starts at top of page 1
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    // 2. Reset modal inner scroll area to top (0)
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+
+    // 3. Small timeout to allow browser layout to flush scroll offset before opening print dialog
+    setTimeout(() => {
+      window.print();
+    }, 50);
   };
+
+  // Ensure native Ctrl+P / browser print invocation also starts at top 0 of Page 1
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+    };
+  }, []);
 
   // Generate high quality PDF Blob using html-to-image & jsPDF (safe from oklch errors and renders Arabic letters connected)
   const generateInvoicePDF = async (): Promise<{ blob: Blob; fileName: string } | null> => {
@@ -275,9 +307,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
           @media print {
             @page {
               size: ${printLayout === 'a4' ? 'A4 portrait' : printLayout === 'a5' ? 'A5 portrait' : '80mm auto'};
-              margin: ${printLayout === 'thermal' ? '2mm' : printLayout === 'a5' ? '4mm' : '5mm'};
+              margin: ${printLayout === 'thermal' ? '1mm 2mm 2mm 2mm' : printLayout === 'a5' ? '2mm 4mm 4mm 4mm' : '2mm 5mm 5mm 5mm'} !important;
             }
-            ${printLayout === 'thermal' ? '#printable-invoice { width: 80mm !important; max-width: 80mm !important; }' : ''}
+            ${printLayout === 'thermal' ? '#printable-invoice { width: 80mm !important; max-width: 80mm !important; padding-top: 0 !important; }' : ''}
+            ${printLayout === 'a5' ? '#printable-invoice { width: 100% !important; max-width: 100% !important; }' : ''}
+            ${printLayout === 'a4' ? '#printable-invoice { width: 100% !important; max-width: 100% !important; }' : ''}
           }
         `
       }} />
@@ -420,13 +454,16 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         )}
 
         {/* Invoice Viewer and Printable Container */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/80 flex justify-center print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:block">
+        <div 
+          ref={scrollContainerRef}
+          className="print-invoice-scroll-area flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/80 flex justify-center print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:block"
+        >
           
           <div
             id="printable-invoice"
             dir="rtl"
             style={{ letterSpacing: 'normal' }}
-            className={`bg-white shadow-xl text-black mx-auto transition-all print:p-0 print:m-0 print:border-none print:shadow-none print:rounded-none ${
+            className={`bg-white shadow-xl text-black mx-auto transition-all print:p-0 print:m-0 print:border-none print:shadow-none print:rounded-none print:w-full print:max-w-none ${
               printLayout === 'thermal'
                 ? 'w-[320px] p-4 rounded-lg border border-slate-400 font-mono text-xs'
                 : printLayout === 'a5'
@@ -580,7 +617,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 </div>
 
                 {/* 5. Bottom Financial Summary Ledger + Notes/Stamp matching Screenshot 3 */}
-                <div className="grid grid-cols-12 gap-2.5 pt-1">
+                <div className="avoid-break grid grid-cols-12 gap-2.5 pt-1">
                   
                   {/* Left side: Notes, Stamp, and Signatures (6 cols) */}
                   <div className="col-span-6 border border-black rounded-md p-2 flex flex-col justify-between text-xs">

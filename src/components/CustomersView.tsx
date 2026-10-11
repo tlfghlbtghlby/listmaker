@@ -507,6 +507,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
+                      window.scrollTo(0, 0);
                       window.print();
                     }}
                     className="flex-1 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1.5 transition"

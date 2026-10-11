@@ -24,7 +24,13 @@
 
 /* Print Styles */
 @media print {
-  /* 1. Eliminate all application screens, headers, navs, and background modals from layout (0px height) */
+  /* 1. Global Page definition - minimal top margin so invoice begins directly at the top of the sheet on Page 1 */
+  @page {
+    size: auto;
+    margin: 2mm 5mm 5mm 5mm !important;
+  }
+
+  /* 2. Eliminate all application screens, headers, navs, and background modals from layout (0px height) */
   .no-print,
   .no-print *,
   header,
@@ -42,7 +48,7 @@
     box-shadow: none !important;
   }
 
-  /* 2. Reset html, body, and root containers so document flow starts at top 0 */
+  /* 3. Reset html, body, and root containers so document flow starts at top 0 of Page 1 */
   html, body {
     background: #ffffff !important;
     color: #000000 !important;
@@ -51,6 +57,7 @@
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    max-height: none !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -63,12 +70,14 @@
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    max-height: none !important;
     display: block !important;
+    flex-direction: row !important;
     overflow: visible !important;
     background: transparent !important;
   }
 
-  /* 3. Strip all modal overlay bounds and scroll offsets */
+  /* 4. Strip all modal overlay bounds and scroll offsets */
   .print-modal-overlay {
     position: static !important;
     inset: auto !important;
@@ -103,7 +112,8 @@
   }
 
   /* The inner scroll container around #printable-invoice */
-  .print-modal-card > div:not(.no-print) {
+  .print-modal-card > div:not(.no-print),
+  .print-invoice-scroll-area {
     padding: 0 !important;
     margin: 0 !important;
     background: transparent !important;
@@ -115,13 +125,13 @@
     width: 100% !important;
   }
 
-  /* 4. Target #printable-invoice directly to begin right at the top of the paper on Page 1 */
+  /* 5. Target #printable-invoice directly to begin right at the top of the paper on Page 1 */
   #printable-invoice {
     position: static !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 auto !important;
-    padding: 0 !important;
+    padding: 1mm 0 0 0 !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
@@ -141,7 +151,27 @@
     font-feature-settings: "liga" 1, "calt" 1 !important;
   }
 
-  tr, th, td, table, .avoid-break {
+  /* Allow table to start naturally on Page 1 and flow rows across pages without jumping */
+  table {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  th, td {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .avoid-break {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

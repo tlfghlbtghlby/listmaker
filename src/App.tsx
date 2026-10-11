@@ -75,7 +75,7 @@ const MainContent: React.FC = () => {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
+    <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
       {/* Top Header */}
       <Header 
         onOpenAuth={() => setIsGuest(false)}
