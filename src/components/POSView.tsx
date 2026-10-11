@@ -154,6 +154,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   // Barcode scanner & instant feedback
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [cartErrorNotice, setCartErrorNotice] = useState<string | null>(null);
   const [unfoundBarcodePrompt, setUnfoundBarcodePrompt] = useState<string | null>(null);
 
   // Financial modifiers
@@ -492,7 +493,8 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   // Handle Submit
   const handleSaveInvoice = (andPrint: boolean) => {
     if (cartItems.length === 0) {
-      alert('الرجاء إضافة مادة واحدة على الأقل إلى القائمة');
+      setCartErrorNotice('الرجاء إضافة مادة واحدة على الأقل إلى القائمة');
+      setTimeout(() => setCartErrorNotice(null), 4000);
       return;
     }
 
@@ -518,9 +520,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
       // If still not a registered customer, block credit sale and propose adding him
       if (!activeCustomer || !finalCustomerId) {
-        alert(
-          'لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام لضمان حفظ الديون ومتابعتها!\nيرجى اختيار زبون قديم من القائمة، أو استخدام خيار "اقتراح إضافة زبون جديد".'
+        setCartErrorNotice(
+          'لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام لضمان حفظ الديون ومتابعتها! يرجى اختيار زبون مسجل أو الضغط على زر الاقتراح.'
         );
+        setTimeout(() => setCartErrorNotice(null), 6000);
         handleOpenQuickAddCustomer(finalCustomerName || undefined);
         return;
       }
@@ -716,28 +719,34 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                       key={prod.id}
                       className={`bg-white rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition text-right group select-none relative ${
                         isOutOfStock
-                          ? 'border-slate-200 opacity-60 bg-slate-50'
+                          ? 'border-rose-300 bg-rose-50/20 hover:border-rose-500 hover:shadow-xs'
                           : 'border-slate-200 hover:border-emerald-500 hover:shadow-xs'
                       }`}
                     >
                       {/* Right side: Product Name, Stock (ABOVE name), Code, Unit, Category & Edit Price Button */}
                       <div
-                        onClick={() => !isOutOfStock && addToCart(prod)}
+                        onClick={() => addToCart(prod)}
                         className="flex-1 min-w-0 cursor-pointer"
                       >
-                        {/* 1. المتوفر فوق الاسم حتى لا يتداخل مع أي شيء آخر */}
+                        {/* 1. المتوفر فوق الاسم مع إظهار رصيد الصفر أو السالب باللون الأحمر الواضح لتنبيه البائع */}
                         <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
                           <span
-                            className={`text-xs font-bold px-2.5 py-0.5 rounded-md border flex items-center gap-1 shrink-0 ${
+                            className={`text-xs font-black px-2.5 py-0.5 rounded-md border flex items-center gap-1 shrink-0 ${
                               isOutOfStock
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                ? 'bg-rose-100 text-rose-800 border-rose-400 animate-pulse font-mono'
                                 : isLowStock
                                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                                 : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                             }`}
                           >
-                            <Package className="w-3.5 h-3.5 shrink-0" />
-                            <span>{isOutOfStock ? 'نافد من المخزن' : `المتوفر: ${prod.stock} ${prod.unit}`}</span>
+                            <Package className={`w-3.5 h-3.5 shrink-0 ${isOutOfStock ? 'text-rose-600' : ''}`} />
+                            {isOutOfStock ? (
+                              <span className="text-rose-700 font-black">
+                                رصيد القطع: {prod.stock} {prod.unit} (تنبيه: رصيد نافد، يُسمح بالبيع)
+                              </span>
+                            ) : (
+                              <span>المتوفر: {prod.stock} {prod.unit}</span>
+                            )}
                             {prod.piecesPerCarton && prod.piecesPerCarton > 1 && !isOutOfStock && (
                               <span className="text-[10px] text-slate-500 font-normal mr-1">
                                 ({Math.floor(prod.stock / prod.piecesPerCarton)} كرتون)
@@ -808,57 +817,63 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         </div>
 
-                        {/* Direct Quick Add Action Buttons */}
-                        {!isOutOfStock ? (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {settings.enableWholesale ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    addToCartWithPrice(prod, 'retail');
-                                  }}
-                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
-                                  title="إضافة بسعر البيع المفرد"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>مفرد</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    addToCartWithPrice(prod, 'wholesale');
-                                  }}
-                                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
-                                  title="إضافة بسعر بيع الجملة"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>جملة</span>
-                                </button>
-                              </>
-                            ) : (
+                        {/* Direct Quick Add Action Buttons - متاح للبيع دائماً حتى لو كان الرصيد صفراً مع تنبيه واضح باللون الأحمر */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {settings.enableWholesale ? (
+                            <>
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   addToCartWithPrice(prod, 'retail');
                                 }}
-                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
-                                title="إضافة المادة للقائمة بسعر المفرد"
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0 ${
+                                  isOutOfStock
+                                    ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-300'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                }`}
+                                title={isOutOfStock ? "إضافة بسعر المفرد (تنبيه: الرصيد صفر في المخزن)" : "إضافة بسعر البيع المفرد"}
                               >
                                 <Plus className="w-3.5 h-3.5" />
-                                <span>إضافة للقائمة</span>
+                                <span>مفرد</span>
                               </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded shrink-0">
-                            غير متوفر
-                          </span>
-                        )}
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addToCartWithPrice(prod, 'wholesale');
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0 ${
+                                  isOutOfStock
+                                    ? 'bg-rose-700 hover:bg-rose-800 text-white ring-2 ring-rose-300'
+                                    : 'bg-amber-600 hover:bg-amber-700 text-white'
+                                }`}
+                                title={isOutOfStock ? "إضافة بسعر الجملة (تنبيه: الرصيد صفر في المخزن)" : "إضافة بسعر بيع الجملة"}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>جملة</span>
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addToCartWithPrice(prod, 'retail');
+                              }}
+                              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0 ${
+                                isOutOfStock
+                                  ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-300'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
+                              title={isOutOfStock ? "إضافة للقائمة (تنبيه: الرصيد صفر في المخزن)" : "إضافة المادة للقائمة بسعر المفرد"}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>{isOutOfStock ? 'بيع (رصيد 0)' : 'إضافة للقائمة'}</span>
+                            </button>
+                          )}
+                        </div>
 
                       </div>
                     </div>
@@ -993,17 +1008,30 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                   const itemProfit = (item.unitPrice - item.costPrice) * item.quantity;
                   const cartonCapacity = item.piecesPerCarton || 1;
                   const isCarton = item.unitType === 'carton';
+                  const prodRef = products.find(p => p.id === item.productId);
+                  const isStockZero = prodRef ? prodRef.stock <= 0 : false;
 
                   return (
                     <div
                       key={item.productId}
-                      className="bg-slate-50 border border-slate-200/90 rounded-lg p-2.5 flex flex-col gap-2"
+                      className={`border rounded-lg p-2.5 flex flex-col gap-2 ${
+                        isStockZero 
+                          ? 'bg-rose-50/50 border-rose-300' 
+                          : 'bg-slate-50 border-slate-200/90'
+                      }`}
                     >
                       {/* Line 1: Item Name, Unit Selector (قطعة أم كرتون), Price selector, Remove */}
                       <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div>
-                          <div className="text-xs font-bold text-slate-900 leading-snug">
-                            {item.productName}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-slate-900 leading-snug">
+                              {item.productName}
+                            </span>
+                            {isStockZero && (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[10px] font-black animate-pulse">
+                                رصيد القطع صفر بالمخزن ({prodRef?.stock ?? 0})
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
                             <span>الوحدة الأساسية: {item.unit}</span>
@@ -1011,6 +1039,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                             <span className="text-emerald-700 font-medium">
                               تكلفة: {formatMoney(item.costPrice)}
                             </span>
+                            {prodRef && (
+                              <span className={prodRef.stock <= 0 ? "text-rose-600 font-bold" : "text-slate-600"}>
+                                · رصيد المخزن: {prodRef.stock} {prodRef.unit}
+                              </span>
+                            )}
                             {isCarton && (
                               <span className="text-amber-800 font-bold bg-amber-100/90 px-1.5 py-0.2 rounded text-[10px]">
                                 (كرتون = {cartonCapacity} قطعة)
@@ -1374,6 +1407,23 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               onChange={(e) => setNotes(e.target.value)}
               className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
+
+            {/* Cart Error Notice Banner */}
+            {cartErrorNotice && (
+              <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <div className="text-[11px] leading-tight">{cartErrorNotice}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCartErrorNotice(null)}
+                  className="text-rose-400 hover:text-rose-700 font-bold px-1"
+                >
+                  ×
+                </button>
+              </div>
+            )}
 
             {/* Credit Warning Alert right above action buttons if credit sale without registered customer */}
             {saleType === 'credit' && !selectedCustomerId && (

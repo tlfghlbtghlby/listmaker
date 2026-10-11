@@ -19,7 +19,12 @@ import {
   Eye,
   EyeOff,
   Lock,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown,
+  Percent,
+  Sliders,
+  Sparkles
 } from 'lucide-react';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
@@ -43,7 +48,9 @@ export const SettingsView: React.FC = () => {
     importDataJSON, 
     resetToZero,
     currentUser,
-    logout
+    logout,
+    products,
+    applyBulkPriceAdjustment
   } = useApp();
 
   const [storeName, setStoreName] = useState(settings.storeName);
@@ -56,8 +63,26 @@ export const SettingsView: React.FC = () => {
   const [enableWholesale, setEnableWholesale] = useState<boolean>(settings.enableWholesale ?? true);
   const [desktopLayout, setDesktopLayout] = useState<'full' | 'partial'>(settings.desktopLayout || 'full');
 
+  // تخصيص وترويسة القائمة والمصطلحات (جملة/تجزئة، مفرد/قطع، عنوان التجارة)
+  const [headerRightSealText, setHeaderRightSealText] = useState(settings.headerRightSealText ?? (settings.enableWholesale ? 'جملة' : 'تجزئة'));
+  const [headerLeftSealText, setHeaderLeftSealText] = useState(settings.headerLeftSealText ?? 'مفرد');
+  const [businessSubtitle, setBusinessSubtitle] = useState(settings.businessSubtitle ?? 'تجارة عامة وبيع الجملة والمفرد');
+  const [managerLabel, setManagerLabel] = useState(settings.managerLabel ?? 'بإدارة');
+
+  // حالة ميزة تصعيد / تخفيض أسعار المواد بالجملة
+  const [bulkPercent, setBulkPercent] = useState<number>(15);
+  const [customPercentInput, setCustomPercentInput] = useState<string>('15');
+  const [priceDirection, setPriceDirection] = useState<'increase' | 'decrease'>('increase');
+  const [targetRetail, setTargetRetail] = useState(true);
+  const [targetWholesale, setTargetWholesale] = useState(true);
+  const [targetCost, setTargetCost] = useState(false);
+  const [roundToHundreds, setRoundToHundreds] = useState(true);
+  const [isApplyingBulkPrices, setIsApplyingBulkPrices] = useState(false);
+  const [bulkPriceSuccess, setBulkPriceSuccess] = useState<string | null>(null);
+
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // Password change state
   const [oldPassword, setOldPassword] = useState('');
@@ -85,9 +110,59 @@ export const SettingsView: React.FC = () => {
       printFormat,
       enableWholesale,
       desktopLayout,
+      headerRightSealText: headerRightSealText.trim() || (enableWholesale ? 'جملة' : 'تجزئة'),
+      headerLeftSealText: headerLeftSealText.trim() || 'مفرد',
+      businessSubtitle: businessSubtitle.trim() || 'تجارة عامة وبيع الجملة والمفرد',
+      managerLabel: managerLabel.trim() || 'بإدارة',
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
+  };
+
+  const handleApplyBulkPrices = async () => {
+    const rawNum = parseFloat(customPercentInput);
+    if (isNaN(rawNum) || rawNum <= 0) {
+      alert('يرجى تحديد نسبة مئوية صحيحة أكبر من صفر (مثال: 15 أو 20)');
+      return;
+    }
+
+    if (!targetRetail && !targetWholesale && !targetCost) {
+      alert('يرجى اختيار نوع سعر واحد على الأقل للتطبيق (المفرد، الجملة، أو التكلفة)');
+      return;
+    }
+
+    const actualPercent = priceDirection === 'increase' ? rawNum : -rawNum;
+    const directionWord = priceDirection === 'increase' ? 'تصعيد ورفع' : 'تخفيض';
+
+    const confirmed = confirm(
+      `هل أنت متأكد من ${directionWord} أسعار المواد بنسبة ${rawNum}% لكافة مواد المخزن (${products.length} مادة)؟\n` +
+      `سيتم تحديث الأسعار سحابياً ومحلياً فوراً.`
+    );
+
+    if (!confirmed) return;
+
+    setIsApplyingBulkPrices(true);
+    try {
+      const res = await applyBulkPriceAdjustment(
+        actualPercent,
+        {
+          retail: targetRetail,
+          wholesale: targetWholesale,
+          cost: targetCost,
+        },
+        roundToHundreds
+      );
+
+      setBulkPriceSuccess(
+        `تم بنجاح ${directionWord} أسعار ${res.updatedCount} مادة بنسبة ${rawNum}%!`
+      );
+      setTimeout(() => setBulkPriceSuccess(null), 5000);
+    } catch (err: any) {
+      console.error('Error applying bulk prices:', err);
+      alert('حدث خطأ أثناء تحديث الأسعار: ' + (err.message || err));
+    } finally {
+      setIsApplyingBulkPrices(false);
+    }
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -154,10 +229,13 @@ export const SettingsView: React.FC = () => {
       const content = event.target?.result as string;
       const res = importDataJSON(content);
       if (res.success) {
+        setImportError(null);
         setImportStatus('تمت استعادة البيانات بنجاح!');
         setTimeout(() => setImportStatus(null), 3000);
       } else {
-        alert(res.error || 'فشلت استعادة البيانات من الملف');
+        setImportStatus(null);
+        setImportError(res.error || 'فشلت استعادة البيانات من الملف');
+        setTimeout(() => setImportError(null), 5000);
       }
     };
     reader.readAsText(file);
@@ -477,6 +555,93 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
+          {/* تخصيص مظهر ونصوص ترويسة القائمة وختمها */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-emerald-600" />
+              <div>
+                <h3 className="text-xs font-bold text-slate-900">
+                  تخصيص عبارات ومظهر القائمة المطبوعة (الختم، التجارة، الإدارة)
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  تحكم بجميع الكلمات والنصوص التي تظهر في أعلى القائمة (مثلاً تغيير تجزئة إلى جملة، أو مفرد إلى قطع)
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              {/* ختم اليمين (مثال: جملة / تجزئة) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نص الختم الأيمن (الافتراضي: جملة أو تجزئة)
+                </label>
+                <input
+                  type="text"
+                  value={headerRightSealText}
+                  onChange={(e) => setHeaderRightSealText(e.target.value)}
+                  placeholder="جملة"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  يمكن كتابة: تجزئة، جملة، مورد، معتمد، أو أي كلمة تريدها داخل النجمة اليمنى
+                </span>
+              </div>
+
+              {/* ختم اليسار (مثال: مفرد / قطع) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نص الختم الأيسر (الافتراضي: مفرد أو قطع)
+                </label>
+                <input
+                  type="text"
+                  value={headerLeftSealText}
+                  onChange={(e) => setHeaderLeftSealText(e.target.value)}
+                  placeholder="مفرد"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  يمكن كتابة: مفرد، قطع، نقداً، فوري، أو أي كلمة تريدها داخل النجمة اليسرى
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* كلمة بإدارة أو إشراف */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  بادئة اسم المدير / الإشراف
+                </label>
+                <input
+                  type="text"
+                  value={managerLabel}
+                  onChange={(e) => setManagerLabel(e.target.value)}
+                  placeholder="بإدارة"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  مثال: بإدارة، بإشراف، المدير العام، مسؤول المبيعات
+                </span>
+              </div>
+
+              {/* نوع التجارة أو النشاط */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نوع التجارة والنشاط (يظهر بجانب اسم الإدارة)
+                </label>
+                <input
+                  type="text"
+                  value={businessSubtitle}
+                  onChange={(e) => setBusinessSubtitle(e.target.value)}
+                  placeholder="تجارة عامة وبيع الجملة والمفرد"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  اكتب نشاط محلك: لتجارة المواد الإنشائية والكهربائية، أدوات منزلية، تجهيزات غذائية، إلخ.
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               ملاحظة أسفل القوائم (شروط الاستبدال، الختم)
@@ -494,12 +659,221 @@ export const SettingsView: React.FC = () => {
               type="submit"
               className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
             >
-              حفظ إعدادات المحل
+              حفظ إعدادات المحل والقوائم
             </button>
           </div>
 
         </form>
 
+      </div>
+
+      {/* ميزة تصعيد وتعديل أسعار المواد (Bulk Price Adjustment) */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                تصعيد أو تخفيض أسعار المواد في المخزن
+              </h2>
+              <p className="text-xs text-slate-400">
+                رفع أو خفض الأسعار بنسبة مئوية (مثلاً 15% أو 20% أو أي نسبة يحددها صاحب المحل) عند تغير السوق
+              </p>
+            </div>
+          </div>
+          <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">
+            {products.length} مادة بالمخزن
+          </span>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {bulkPriceSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-2 shadow-2xs animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{bulkPriceSuccess}</span>
+            </div>
+          )}
+
+          {/* الاتجاه: رفع/تصعيد أم خفض */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              نوع العملية المطلوبة:
+            </label>
+            <div className="grid grid-cols-2 gap-3 max-w-md">
+              <button
+                type="button"
+                onClick={() => setPriceDirection('increase')}
+                className={`p-3 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+                  priceDirection === 'increase'
+                    ? 'bg-rose-50 border-rose-500 text-rose-700 ring-2 ring-rose-500/20 shadow-xs'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4 text-rose-600" />
+                <span>تصعيد ورفع الأسعار (زيادة)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPriceDirection('decrease')}
+                className={`p-3 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+                  priceDirection === 'decrease'
+                    ? 'bg-blue-50 border-blue-500 text-blue-700 ring-2 ring-blue-500/20 shadow-xs'
+                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                }`}
+              >
+                <TrendingDown className="w-4 h-4 text-blue-600" />
+                <span>تخفيض الأسعار (نزول السوق)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* اختيار النسبة المئوية */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              النسبة المئوية المراد تطبيقها:
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {[5, 10, 15, 20, 25, 30].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => {
+                    setBulkPercent(pct);
+                    setCustomPercentInput(String(pct));
+                  }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition cursor-pointer ${
+                    customPercentInput === String(pct)
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {pct}%
+                </button>
+              ))}
+
+              <div className="flex items-center gap-1.5 mr-2">
+                <span className="text-xs text-slate-500 font-bold">أو نسبة مخصصة:</span>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="500"
+                    step="0.5"
+                    value={customPercentInput}
+                    onChange={(e) => {
+                      setCustomPercentInput(e.target.value);
+                      const parsed = parseFloat(e.target.value);
+                      if (!isNaN(parsed)) setBulkPercent(parsed);
+                    }}
+                    placeholder="20"
+                    className="w-20 pl-7 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg text-center font-black focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <Percent className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* تحديد الأسعار المستهدفة بالتعديل */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <label className="block text-xs font-bold text-slate-800 mb-2">
+              الأسعار التي سيتم تعديلها:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-emerald-400">
+                <input
+                  type="checkbox"
+                  checked={targetRetail}
+                  onChange={(e) => setTargetRetail(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-xs font-bold text-slate-800">سعر البيع المفرد (التجزئة)</span>
+              </label>
+
+              {settings.enableWholesale && (
+                <label className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-emerald-400">
+                  <input
+                    type="checkbox"
+                    checked={targetWholesale}
+                    onChange={(e) => setTargetWholesale(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-amber-500"
+                  />
+                  <span className="text-xs font-bold text-slate-800">سعر بيع الجملة</span>
+                </label>
+              )}
+
+              <label className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-slate-200 cursor-pointer hover:border-emerald-400">
+                <input
+                  type="checkbox"
+                  checked={targetCost}
+                  onChange={(e) => setTargetCost(e.target.checked)}
+                  className="rounded text-slate-600 focus:ring-slate-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">سعر التكلفة والشراء</span>
+                  <span className="text-[10px] text-slate-400">في حال ارتفعت تكلفة الاستيراد</span>
+                </div>
+              </label>
+            </div>
+
+            {/* خيار التقريب التجاري الأنيق */}
+            <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={roundToHundreds}
+                  onChange={(e) => setRoundToHundreds(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-xs text-slate-700 font-semibold">
+                  تقريب الأسعار تجارياً لأقرب 250 دينار (تجنب الكسور المعقدة في الصرف)
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* زر تطبيق تصعيد / تخفيض الأسعار */}
+          <div className="flex items-center justify-between pt-2">
+            <div className="text-xs text-slate-500">
+              {priceDirection === 'increase' ? 'الزيادة المقررة:' : 'الخصم المقرر:'}
+              <strong className="text-slate-900 mx-1">
+                {priceDirection === 'increase' ? '+' : '-'}{customPercentInput || '0'}%
+              </strong>
+              على {targetRetail && 'المفرد '}{targetWholesale && 'الجملة '}{targetCost && 'التكلفة'}
+            </div>
+
+            <button
+              type="button"
+              disabled={isApplyingBulkPrices || products.length === 0}
+              onClick={handleApplyBulkPrices}
+              className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 shadow-xs cursor-pointer ${
+                isApplyingBulkPrices
+                  ? 'bg-slate-500 cursor-wait'
+                  : priceDirection === 'increase'
+                  ? 'bg-rose-600 hover:bg-rose-700'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              {isApplyingBulkPrices ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>جاري تحديث أسعار المخزن...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>
+                    تطبيق {priceDirection === 'increase' ? 'تصعيد الأسعار' : 'تخفيض الأسعار'} الآن ({customPercentInput}%)
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+
+        </div>
       </div>
 
       {/* Password Change Section (تغيير كلمة المرور) */}
@@ -653,9 +1027,16 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {importStatus && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-1.5 shadow-2xs">
             <Check className="w-4 h-4" />
             <span>{importStatus}</span>
+          </div>
+        )}
+
+        {importError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-800 flex items-center gap-1.5 shadow-2xs">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{importError}</span>
           </div>
         )}
 

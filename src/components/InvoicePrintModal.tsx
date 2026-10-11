@@ -39,6 +39,24 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Ensure native Ctrl+P / browser print invocation also starts at top 0 of Page 1
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+    };
+  }, []);
 
   if (!invoice) return null;
 
@@ -68,8 +86,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const totalRemainingDebt = Math.max(0, grandTotal - paid);
   const currencyLabel = settings.currency || 'دينار';
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-
   // Native Print with absolute top scroll reset
   const handlePrint = () => {
     // 1. Reset window and document scroll to top so print engine starts at top of page 1
@@ -87,23 +103,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       window.print();
     }, 50);
   };
-
-  // Ensure native Ctrl+P / browser print invocation also starts at top 0 of Page 1
-  useEffect(() => {
-    const handleBeforePrint = () => {
-      window.scrollTo(0, 0);
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = 0;
-      }
-    };
-
-    window.addEventListener('beforeprint', handleBeforePrint);
-    return () => {
-      window.removeEventListener('beforeprint', handleBeforePrint);
-    };
-  }, []);
 
   // Generate high quality PDF Blob using html-to-image & jsPDF (safe from oklch errors and renders Arabic letters connected)
   const generateInvoicePDF = async (): Promise<{ blob: Blob; fileName: string } | null> => {
@@ -479,14 +478,18 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 {/* 1. Header Box with Corner Seals */}
                 <div className="border border-black rounded-md p-2.5 sm:p-3 relative flex flex-col items-center justify-center text-center">
                   
-                  {/* Right Seal: جملة */}
+                  {/* Right Seal: مخصص أو جملة / تجزئة */}
                   <div className="absolute right-2.5 top-2">
-                    <StarburstSeal text={settings.enableWholesale ? "جملة" : "تجزئة"} />
+                    <StarburstSeal 
+                      text={settings.headerRightSealText || (settings.enableWholesale ? "جملة" : "تجزئة")} 
+                    />
                   </div>
 
-                  {/* Left Seal: مفرد */}
+                  {/* Left Seal: مخصص أو مفرد / قطع */}
                   <div className="absolute left-2.5 top-2">
-                    <StarburstSeal text="مفرد" />
+                    <StarburstSeal 
+                      text={settings.headerLeftSealText || "مفرد"} 
+                    />
                   </div>
 
                   {/* Center Store Title */}
@@ -495,7 +498,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </h1>
 
                   <div className="text-xs sm:text-sm font-bold text-black mt-1">
-                    بإدارة: {settings.ownerName || settings.storeName} · تجارة عامة وبيع الجملة والمفرد
+                    {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName} · {settings.businessSubtitle || 'تجارة عامة وبيع الجملة والمفرد'}
                   </div>
 
                   {/* Address & Phone */}
@@ -512,6 +515,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   <div className="flex items-center gap-1.5">
                     <span>رقم القائمة:</span>
                     <span className="font-mono text-sm">{invoice.invoiceNumber}</span>
+                    {invoice.status === 'returned' && (
+                      <span className="mr-2 px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-400 text-[10px] font-black">
+                        قائمة مرتجعة
+                      </span>
+                    )}
                   </div>
 
                   <div>
@@ -724,11 +732,20 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 <div className="text-center border-b border-dashed border-black pb-2">
                   <div className="font-black text-sm">{settings.storeName || 'انشائية المسعودي'}</div>
                   <div className="text-[10px] text-slate-700 mt-0.5">
-                    بإدارة: {settings.ownerName || settings.storeName}
+                    {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName}
                   </div>
+                  {settings.businessSubtitle && (
+                    <div className="text-[9px] text-slate-600 mt-0.5">
+                      {settings.businessSubtitle}
+                    </div>
+                  )}
                   {settings.phone && <div className="text-[10px] text-slate-700">{settings.phone}</div>}
                   <div className="font-bold text-xs mt-1">
-                    {invoice.type === 'direct' ? '** وصل بيع مباشر **' : '** وصل بيع آجل (دين) **'}
+                    {invoice.status === 'returned'
+                      ? '** وصل قائمة مرتجعة (ملغاة) **'
+                      : invoice.type === 'direct'
+                      ? '** وصل بيع مباشر **'
+                      : '** وصل بيع آجل (دين) **'}
                   </div>
                 </div>
 

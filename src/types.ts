@@ -1,6 +1,6 @@
 export type SaleType = 'direct' | 'credit'; // بيع مباشر (نقدي) أو بيع آجل (دين)
 export type PriceType = 'retail' | 'wholesale'; // سعر البيع العادي أو سعر الجملة
-export type InvoiceStatus = 'paid' | 'partial' | 'unpaid';
+export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'returned';
 
 export interface Product {
   id: string;
@@ -18,6 +18,8 @@ export interface Product {
   createdAt: string;
   updatedAt: string;
 }
+
+export type Item = Product;
 
 export interface Customer {
   id: string;
@@ -119,4 +121,9 @@ export interface StoreSettings {
   enableWholesale: boolean; // تفعيل أو إلغاء إظهار سعر بيع الجملة
   deviceMode: DeviceMode; // وضع الحاسبة أو وضع الهاتف (Android / iPhone)
   desktopLayout: DesktopLayoutMode; // 'full' = وضع الكمبيوتر الكامل (شاشة مستطيلة جانبية: المواد وبجانبها القائمة), 'partial' = وضع الكمبيوتر الجزئي
+  // تخصيص نصوص وترويسة القائمة حسب رغبة صاحب المحل
+  headerRightSealText?: string; // مثلاً "جملة" أو "تجزئة" أو "مورد" أو أي نص
+  headerLeftSealText?: string; // مثلاً "مفرد" أو "قطع" أو "نقد"
+  businessSubtitle?: string; // مثلاً "تجارة عامة وبيع الجملة والمفرد" أو "لتجارة المواد الإنشائية والكهربائية"
+  managerLabel?: string; // مثلاً "بإدارة" أو "إشراف" أو "المدير العام"
 }

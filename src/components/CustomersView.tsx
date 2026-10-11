@@ -54,6 +54,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
   const [newCustAddress, setNewCustAddress] = useState('');
   const [newCustInitialDebt, setNewCustInitialDebt] = useState<number | ''>('');
   const [newCustNotes, setNewCustNotes] = useState('');
+  const [newCustError, setNewCustError] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   // Filtered customers
   const filteredCustomers = useMemo(() => {
@@ -87,6 +89,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
     setPaymentAmount(cust.totalDebt > 0 ? cust.totalDebt : '');
     setPaymentNotes('');
     setRecentReceipt(null);
+    setPaymentError(null);
     setIsPaymentModalOpen(true);
   };
 
@@ -94,9 +97,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
   const handleRecordPaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomer || !paymentAmount || Number(paymentAmount) <= 0) {
-      alert('الرجاء إدخال مبلغ سداد صحيح أكبر من الصفر');
+      setPaymentError('الرجاء إدخال مبلغ سداد صحيح أكبر من الصفر');
       return;
     }
+    setPaymentError(null);
 
     const receipt = recordPayment(
       selectedCustomer.id,
@@ -114,9 +118,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
   const handleCreateCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustName.trim()) {
-      alert('اسم الزبون مطلوب');
+      setNewCustError('اسم الزبون مطلوب');
       return;
     }
+    setNewCustError(null);
 
     addCustomer({
       name: newCustName.trim(),
@@ -131,6 +136,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
     setNewCustAddress('');
     setNewCustInitialDebt('');
     setNewCustNotes('');
+    setNewCustError(null);
     setIsAddCustomerOpen(false);
   };
 
@@ -525,6 +531,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
               </div>
             ) : (
               <form onSubmit={handleRecordPaymentSubmit} className="p-6 space-y-4">
+                {paymentError && (
+                  <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold">
+                    {paymentError}
+                  </div>
+                )}
                 
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs flex justify-between items-center text-amber-900">
                   <span>الدين الحالي المستحق:</span>
@@ -605,6 +616,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
             </div>
 
             <form onSubmit={handleCreateCustomerSubmit} className="p-6 space-y-4">
+              {newCustError && (
+                <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold">
+                  {newCustError}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   اسم الزبون / الشركة <span className="text-rose-500">*</span>

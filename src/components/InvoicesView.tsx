@@ -13,7 +13,9 @@ import {
   Calendar,
   Filter,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  RotateCcw,
+  Undo2
 } from 'lucide-react';
 
 interface InvoicesViewProps {
@@ -21,10 +23,12 @@ interface InvoicesViewProps {
 }
 
 export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => {
-  const { invoices, deleteInvoice, formatMoney } = useApp();
+  const { invoices, deleteInvoice, returnInvoice, formatMoney } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'direct' | 'credit' | 'unpaid'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'direct' | 'credit' | 'unpaid' | 'returned'>('all');
+  const [returningId, setReturningId] = useState<string | null>(null);
+  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
@@ -38,25 +42,61 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
       let matchType = true;
       if (typeFilter === 'direct') matchType = inv.type === 'direct';
       else if (typeFilter === 'credit') matchType = inv.type === 'credit';
-      else if (typeFilter === 'unpaid') matchType = inv.remainingAmount > 0;
+      else if (typeFilter === 'unpaid') matchType = inv.remainingAmount > 0 && inv.status !== 'returned';
+      else if (typeFilter === 'returned') matchType = inv.status === 'returned';
 
       return matchSearch && matchType;
     });
   }, [invoices, searchQuery, typeFilter]);
 
-  // Overall financial summary for invoices
-  const totalSales = invoices.reduce((sum, inv) => sum + inv.total, 0);
-  const totalPaidCash = invoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
-  const totalRemainingCredit = invoices.reduce((sum, inv) => sum + inv.remainingAmount, 0);
-  const totalProfits = invoices.reduce((sum, inv) => sum + inv.netProfit, 0);
+  // Overall financial summary for active invoices (exclude returned from active sales)
+  const activeInvoices = useMemo(() => invoices.filter(i => i.status !== 'returned'), [invoices]);
+  const totalSales = activeInvoices.reduce((sum, inv) => sum + inv.total, 0);
+  const totalPaidCash = activeInvoices.reduce((sum, inv) => sum + inv.paidAmount, 0);
+  const totalRemainingCredit = activeInvoices.reduce((sum, inv) => sum + inv.remainingAmount, 0);
+  const totalProfits = activeInvoices.reduce((sum, inv) => sum + inv.netProfit, 0);
+
+  const handleReturn = async (inv: Invoice) => {
+    if (inv.status === 'returned') {
+      alert('هذه القائمة تم إرجاعها مسبقاً والمواد مستردة بالمخزن.');
+      return;
+    }
+
+    const confirmed = confirm(
+      `هل تراجع الزبون عن الشراء وتريد إرجاع القائمة رقم (${inv.invoiceNumber})؟\n\n` +
+      `✓ ستعود كميات كافة المواد (${inv.items.length} مواد) فوراً إلى رصيد المخزن.\n` +
+      `✓ سيتم إلغاء المتبقي من دين العميل لهذه القائمة تلقائياً.\n` +
+      `✓ سيتم الاحتفاظ بسجل القائمة بحالة (مرتجعة) للتدقيق والشفافية.`
+    );
+
+    if (!confirmed) return;
+
+    setReturningId(inv.id);
+    try {
+      const ok = await returnInvoice(inv.id);
+      if (ok) {
+        setFeedbackNotice(`تم إرجاع القائمة (${inv.invoiceNumber}) واسترداد كافة المواد إلى المخزن بنجاح!`);
+        setTimeout(() => setFeedbackNotice(null), 5000);
+      } else {
+        alert('حدث خطأ أثناء إرجاع القائمة');
+      }
+    } catch (e: any) {
+      alert('فشل إرجاع القائمة: ' + (e.message || e));
+    } finally {
+      setReturningId(null);
+    }
+  };
 
   const handleDelete = (inv: Invoice) => {
     if (
       confirm(
-        `هل أنت متأكد من إلغاء وحذف القائمة رقم (${inv.invoiceNumber})؟\nسيتم إرجاع المواد المباعة إلى المخزن وتعديل حساب الزبون تلقائياً.`
+        `هل أنت متأكد من حذف القائمة رقم (${inv.invoiceNumber}) نهائياً؟\n` +
+        (inv.status !== 'returned' ? 'سيتم إرجاع المواد المباعة إلى المخزن وتعديل حساب الزبون تلقائياً.' : 'سيتم حذف سجل الفاتورة المرتجعة نهائياً.')
       )
     ) {
       deleteInvoice(inv.id);
+      setFeedbackNotice(`تم حذف القائمة (${inv.invoiceNumber})`);
+      setTimeout(() => setFeedbackNotice(null), 3000);
     }
   };
 
@@ -157,11 +197,38 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                 : 'bg-rose-50 text-rose-800 hover:bg-rose-100'
             }`}
           >
-            غير مسدد ({invoices.filter((i) => i.remainingAmount > 0).length})
+            غير مسدد ({invoices.filter((i) => i.remainingAmount > 0 && i.status !== 'returned').length})
+          </button>
+
+          <button
+            onClick={() => setTypeFilter('returned')}
+            className={`px-3 py-1.5 rounded-lg transition ${
+              typeFilter === 'returned'
+                ? 'bg-purple-700 text-white'
+                : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
+            }`}
+          >
+            مرتجعة ({invoices.filter((i) => i.status === 'returned').length})
           </button>
         </div>
 
       </div>
+
+      {/* Feedback Toast Notice */}
+      {feedbackNotice && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 flex items-center justify-between shadow-2xs animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{feedbackNotice}</span>
+          </div>
+          <button
+            onClick={() => setFeedbackNotice(null)}
+            className="text-[11px] text-emerald-700 hover:text-emerald-900 underline"
+          >
+            إغلاق
+          </button>
+        </div>
+      )}
 
       {/* Invoices Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -207,7 +274,14 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                     <tr key={inv.id} className="hover:bg-slate-50/70 transition">
                       {/* Invoice # */}
                       <td className="py-3 px-4 font-mono font-bold text-slate-800 text-xs">
-                        {inv.invoiceNumber}
+                        <div className="flex items-center gap-1.5">
+                          <span>{inv.invoiceNumber}</span>
+                          {inv.status === 'returned' && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-black">
+                              مرتجعة
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Date & Time */}
@@ -281,10 +355,29 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                             <Printer className="w-4 h-4" />
                           </button>
 
+                          {/* زر إرجاع المشتريات / القائمة */}
+                          {inv.status !== 'returned' ? (
+                            <button
+                              disabled={returningId === inv.id}
+                              onClick={() => handleReturn(inv)}
+                              className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 transition flex items-center gap-1"
+                              title="إرجاع القائمة واسترداد المواد للمخزن (في حال تخلى الزبون عن الشراء)"
+                            >
+                              <RotateCcw className={`w-4 h-4 ${returningId === inv.id ? 'animate-spin' : ''}`} />
+                            </button>
+                          ) : (
+                            <span 
+                              className="p-1.5 text-slate-300 cursor-not-allowed" 
+                              title="تم إرجاع هذه القائمة والمواد مستردة"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </span>
+                          )}
+
                           <button
                             onClick={() => handleDelete(inv)}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                            title="إلغاء وحذف القائمة"
+                            title="إلغاء وحذف القائمة نهائياً"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
