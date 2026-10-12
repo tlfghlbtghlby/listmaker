@@ -141,7 +141,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const activeSession = localStorage.getItem('active_client_session');
       if (activeSession) {
-        setCurrentUser(JSON.parse(activeSession));
+        const userObj = JSON.parse(activeSession);
+        setCurrentUser(userObj);
+
+        // Fetch latest store data from server if local is empty or to reconcile
+        if (userObj?.uid) {
+          fetch(`/api/sync/${userObj.uid}`)
+            .then(r => r.json())
+            .then(res => {
+              if (res.success && res.data) {
+                if (Array.isArray(res.data.products) && res.data.products.length > 0) {
+                  setProducts(prev => prev.length === 0 ? res.data.products : prev);
+                  if (!itemsRaw) {
+                    try { localStorage.setItem('items_backup', JSON.stringify(res.data.products)); } catch (e) {}
+                  }
+                }
+                if (Array.isArray(res.data.invoices) && res.data.invoices.length > 0) {
+                  setInvoices(prev => prev.length === 0 ? res.data.invoices : prev);
+                }
+                if (Array.isArray(res.data.customers) && res.data.customers.length > 0) {
+                  setCustomers(prev => prev.length === 0 ? res.data.customers : prev);
+                }
+                if (res.data.settings && !settingsRaw) {
+                  setSettings(prev => ({ ...prev, ...res.data.settings }));
+                }
+              }
+            })
+            .catch(() => {});
+        }
       }
     } catch (e) {
       console.warn("Local storage backup read notice:", e);
@@ -249,10 +276,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Direct write to Firestore collection 'items' (Atomic persistent offline/online sync)
     setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct), { merge: true }).catch(err => {
-      console.error("Firestore add product error:", err);
+      console.warn("Firestore add product notice:", err);
     });
 
-    setProducts(prev => [newProduct, ...prev]);
+    setProducts(prev => {
+      const updated = [newProduct, ...prev];
+      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+
+    // Sync to server backend
+    const uid = currentUser?.uid;
+    if (uid) {
+      fetch(`/api/sync/${uid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products: [newProduct, ...products], invoices, customers, settings })
+      }).catch(() => {});
+    }
+
     return newProduct;
   };
 
@@ -275,18 +317,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       createdList.push(fullProd);
 
-      try {
-        await setDoc(doc(db, 'items', newId), sanitizeForFirestore(fullProd), { merge: true });
-      } catch (err) {
-        console.error("Firestore bulk add item error:", err);
-      }
+      // Non-blocking fire-and-forget write to Firestore so offline/latency never freezes execution
+      setDoc(doc(db, 'items', newId), sanitizeForFirestore(fullProd), { merge: true }).catch(err => {
+        console.warn("Firestore bulk add item sync notice:", err);
+      });
 
       if (onProgress) {
         onProgress(i + 1, total);
       }
     }
 
-    setProducts(prev => [...createdList, ...prev]);
+    let allUpdated: Product[] = [];
+    setProducts(prev => {
+      allUpdated = [...createdList, ...prev];
+      try {
+        localStorage.setItem('items_backup', JSON.stringify(allUpdated));
+      } catch (e) {}
+      return allUpdated;
+    });
+
+    // Also sync updated store data to server endpoint
+    const uid = currentUser?.uid;
+    if (uid) {
+      try {
+        fetch(`/api/sync/${uid}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            products: allUpdated.length > 0 ? allUpdated : [...createdList, ...products],
+            invoices,
+            customers,
+            settings
+          })
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
     return { success: true, count: createdList.length, products: createdList };
   };
 
@@ -296,19 +362,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Direct write to Firestore collection 'items'
     setDoc(doc(db, 'items', id), sanitizeForFirestore(finalUpdates), { merge: true }).catch(err => {
-      console.error("Firestore update product error:", err);
+      console.warn("Firestore update product notice:", err);
     });
 
-    setProducts(prev => prev.map(item => item.id === id ? { ...item, ...finalUpdates } : item));
+    setProducts(prev => {
+      const updated = prev.map(item => item.id === id ? { ...item, ...finalUpdates } : item);
+      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const deleteProduct = (id: string) => {
     // Direct delete from Firestore collection 'items'
     deleteDoc(doc(db, 'items', id)).catch(err => {
-      console.error("Firestore delete product error:", err);
+      console.warn("Firestore delete product notice:", err);
     });
 
-    setProducts(prev => prev.filter(item => item.id !== id));
+    setProducts(prev => {
+      const updated = prev.filter(item => item.id !== id);
+      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const adjustStock = (id: string, delta: number) => {

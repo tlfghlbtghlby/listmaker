@@ -70,7 +70,7 @@ const SAMPLE_TEXT = `بيض, 12, 6000, 72000, 6500, 78000, 1ك
 معجون أسنان كولجيت, 12, 1000, 12000, 1500, 18000, 20ق, 0, 0, 629100123456`;
 
 export const QuickAddItemsSection: React.FC = () => {
-  const { products, addBulkProducts, formatMoney } = useApp();
+  const { products, addBulkProducts, formatMoney, setSyncNotice } = useApp();
 
   const [rawText, setRawText] = useState('');
   const [parsedItems, setParsedItems] = useState<ParsedQuickItem[]>([]);
@@ -78,6 +78,7 @@ export const QuickAddItemsSection: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [uploadSuccessCount, setUploadSuccessCount] = useState<number | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   // Set of all existing barcodes to guarantee uniqueness
   const existingCodesSet = useMemo(() => {
@@ -236,13 +237,14 @@ export const QuickAddItemsSection: React.FC = () => {
   };
 
   const handlePreview = () => {
+    setInlineError(null);
     if (!rawText.trim()) {
-      alert('يرجى كتابة أو لصق أسطر المواد أولاً');
+      setInlineError('يرجى كتابة أو لصق أسطر المواد أولاً في المربع أدناه');
       return;
     }
     const parsed = parseLines(rawText);
     if (parsed.length === 0) {
-      alert('لم يتم العثور على أي أسطر صالحة للمعالجة');
+      setInlineError('لم يتم العثور على أي أسطر صالحة للمعالجة');
       return;
     }
     setParsedItems(parsed);
@@ -255,16 +257,12 @@ export const QuickAddItemsSection: React.FC = () => {
   };
 
   const handleSaveToFirestore = async () => {
+    setInlineError(null);
     const validItems = parsedItems.filter((item) => item.isValid);
     if (validItems.length === 0) {
-      alert('لا توجد مواد صالحة للحفظ');
+      setInlineError('لا توجد مواد صالحة للحفظ. يرجى التأكد من اسم المادة في كل سطر.');
       return;
     }
-
-    const confirmSave = confirm(
-      `هل أنت متأكد من حفظ وإضافة (${validItems.length}) مادة إلى المخزن وقاعدة البيانات السحابية فوراً؟`
-    );
-    if (!confirmSave) return;
 
     setIsUploading(true);
     setUploadProgress({ current: 0, total: validItems.length });
@@ -277,7 +275,7 @@ export const QuickAddItemsSection: React.FC = () => {
       unit: 'قطعة',
       costPrice: item.costPiece,
       retailPrice: item.retailPricePiece,
-      wholesalePrice: item.wholesalePricePiece,
+      wholesalePrice: item.wholesalePricePiece || item.retailPricePiece,
       stock: item.totalStockPieces,
       piecesPerCarton: item.piecesPerBox,
       minStock: Math.max(5, Math.round(item.piecesPerBox / 2)),
@@ -289,15 +287,18 @@ export const QuickAddItemsSection: React.FC = () => {
         setUploadProgress({ current, total });
       });
 
-      if (result.success) {
+      if (result && result.success) {
         setUploadSuccessCount(result.count);
         setRawText('');
         setParsedItems([]);
         setHasPreviewed(false);
+        if (setSyncNotice) {
+          setSyncNotice(`تم بنجاح حفظ وإضافة ${result.count} مادة إلى المخزن والمزامنة السحابية!`);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error during bulk save:', err);
-      alert('حدث خطأ أثناء رفع المواد، يرجى المحاولة مرة أخرى');
+      setInlineError('حدث خطأ أثناء حفظ المواد: ' + (err?.message || 'يرجى المحاولة مرة أخرى'));
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
@@ -377,9 +378,26 @@ export const QuickAddItemsSection: React.FC = () => {
           <button
             type="button"
             onClick={() => setUploadSuccessCount(null)}
-            className="text-xs font-bold px-3 py-1 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg text-emerald-800 transition"
+            className="text-xs font-bold px-3 py-1 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg text-emerald-800 transition cursor-pointer"
           >
             إغلاق
+          </button>
+        </div>
+      )}
+
+      {/* Inline Error Notice */}
+      {inlineError && (
+        <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 flex items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="font-bold">{inlineError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setInlineError(null)}
+            className="text-slate-400 hover:text-slate-600 px-1 font-bold cursor-pointer"
+          >
+            ✕
           </button>
         </div>
       )}
@@ -447,6 +465,7 @@ export const QuickAddItemsSection: React.FC = () => {
           onChange={(e) => {
             setRawText(e.target.value);
             setHasPreviewed(false);
+            setInlineError(null);
           }}
           placeholder={`بيض, 12, 6000, 72000, 6500, 78000, 1ك
 حليب المراعي, 24, 1500, 0, 2000, 0, 5ك, 1800, 0
@@ -516,14 +535,23 @@ export const QuickAddItemsSection: React.FC = () => {
                 type="button"
                 onClick={handleSaveToFirestore}
                 disabled={validCount === 0 || isUploading}
-                className={`px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition flex items-center gap-2 cursor-pointer ${
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-xs transition flex items-center gap-2 cursor-pointer ${
                   validCount === 0 || isUploading
-                    ? 'bg-slate-400 cursor-not-allowed'
-                    : 'bg-emerald-600 hover:bg-emerald-700'
+                    ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                    : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
                 }`}
               >
-                <Cloud className="w-4 h-4" />
-                <span>حفظ وإضافة للمخزن السحابي ({validCount} مادة)</span>
+                {isUploading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>جاري الحفظ ({uploadProgress ? `${uploadProgress.current}/${uploadProgress.total}` : '...'})</span>
+                  </>
+                ) : (
+                  <>
+                    <Cloud className="w-4 h-4" />
+                    <span>حفظ وإضافة للمخزن السحابي ({validCount} مادة)</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -659,12 +687,21 @@ export const QuickAddItemsSection: React.FC = () => {
               disabled={validCount === 0 || isUploading}
               className={`px-6 py-2.5 rounded-xl text-xs font-black text-white shadow-sm transition flex items-center justify-center gap-2 cursor-pointer ${
                 validCount === 0 || isUploading
-                  ? 'bg-slate-400 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
+                  ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95'
               }`}
             >
-              <Cloud className="w-4 h-4" />
-              <span>حفظ وإضافة للمخزن السحابي فوراً</span>
+              {isUploading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <span>جاري الحفظ وإضافة المواد إلى المخزن...</span>
+                </>
+              ) : (
+                <>
+                  <Cloud className="w-4 h-4" />
+                  <span>حفظ وإضافة للمخزن السحابي فوراً</span>
+                </>
+              )}
             </button>
           </div>
 
