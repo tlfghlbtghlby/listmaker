@@ -1,41 +1,29 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Admin check helper function (tlfghlbtghlby@gmail.com)
-    function isAdmin() {
-      return request.auth != null && 
-        (request.auth.token.email == 'tlfghlbtghlby@gmail.com' || 
-         request.auth.token.email.lower() == 'tlfghlbtghlby@gmail.com');
+
+    match /items/{itemId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.ownerUid == request.auth.uid || request.auth.uid == '0A6uEqBONPdjOjAEFO0pgfyTs082');
     }
 
-    // Authenticated check
-    function isAuthenticated() {
-      return request.auth != null;
+    match /invoices/{invoiceId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.ownerUid == request.auth.uid || request.auth.uid == '0A6uEqBONPdjOjAEFO0pgfyTs082');
     }
 
-    // Check if user owns the document
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    match /customers/{customerId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.ownerUid == request.auth.uid || request.auth.uid == '0A6uEqBONPdjOjAEFO0pgfyTs082');
     }
 
-    // User Profile collection:
-    // Only the primary admin (tlfghlbtghlby@gmail.com) can create, list, or delete user accounts.
-    // Client users can only read their own user record.
+    match /payments/{paymentId} {
+      allow read, write: if request.auth != null && (resource == null || resource.data.ownerUid == request.auth.uid || request.auth.uid == '0A6uEqBONPdjOjAEFO0pgfyTs082');
+    }
+
+    match /stores/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role);
-
-      // User's private store collection (products, invoices, customers, settings)
-      match /store/{docId} {
-        allow read, write: if isOwner(userId) || isAdmin();
-      }
-    }
-
-    // Default: Only Admin can access any other collections
-    match /{document=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if request.auth != null;
     }
   }
 }

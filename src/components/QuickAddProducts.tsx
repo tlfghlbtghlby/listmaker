@@ -37,7 +37,7 @@ interface ParsedItem {
 }
 
 export const QuickAddProducts: React.FC = () => {
-  const { products, setSyncNotice, formatMoney, settings } = useApp();
+  const { products, setSyncNotice, formatMoney, settings, currentUser } = useApp();
   
   const [inputText, setInputText] = useState<string>('');
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([]);
@@ -208,6 +208,7 @@ export const QuickAddProducts: React.FC = () => {
         const item = parsedItems[i];
         const newProduct: Product = {
           id: item.id,
+          ownerUid: currentUser?.uid || 'guest',
           code: item.barcode,
           name: item.name,
           category: 'عام',

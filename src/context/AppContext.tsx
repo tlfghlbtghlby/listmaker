@@ -1,14 +1,16 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   collection, 
   doc, 
+  query,
+  where,
   onSnapshot, 
   setDoc, 
   updateDoc, 
   deleteDoc 
 } from 'firebase/firestore';
 import { db, logoutAccount } from '../firebase';
-import { User } from 'firebase/auth';
+import { UserProfile } from '../types';
 import { 
   Product, 
   Customer, 
@@ -19,6 +21,13 @@ import {
   StoreSettings, 
   CreateInvoiceInput 
 } from '../types';
+import { 
+  LEGACY_ACCOUNT_UID, 
+  LEGACY_PRODUCTS, 
+  LEGACY_INVOICES, 
+  LEGACY_CUSTOMERS, 
+  LEGACY_SETTINGS 
+} from '../data/legacySeed';
 
 interface AppContextType {
   // Data
@@ -60,7 +69,7 @@ interface AppContextType {
   formatMoney: (amount: number) => string;
 
   // Cloud & Auth
-  currentUser: User | null;
+  currentUser: UserProfile | null;
   authLoading: boolean;
   isCloudConnected: boolean;
   isSyncing: boolean;
@@ -87,7 +96,7 @@ const defaultEmptySettings: StoreSettings = {
   desktopLayout: 'full',
 };
 
-// Recursively remove undefined values so Firestore setDoc/updateDoc never fails
+// Recursively sanitize objects for Firestore
 export const sanitizeForFirestore = <T = any>(obj: T): T => {
   if (obj === null || obj === undefined) {
     return null as any;
@@ -120,72 +129,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<StoreSettings>(defaultEmptySettings);
 
   // Cloud & Auth State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isCloudConnected, setIsCloudConnected] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // 1. Initial Local Backup Read for instant 0ms startup
+  const hasSeededLegacyRef = useRef(false);
+
+  // 1. Initial Session Load (Strictly per user, no global cross-tenant leakage)
   useEffect(() => {
     try {
-      const itemsRaw = localStorage.getItem('items_backup');
-      if (itemsRaw) setProducts(JSON.parse(itemsRaw));
-      const invRaw = localStorage.getItem('invoices_backup');
-      if (invRaw) setInvoices(JSON.parse(invRaw));
-      const custRaw = localStorage.getItem('customers_backup');
-      if (custRaw) setCustomers(JSON.parse(custRaw));
-      const settingsRaw = localStorage.getItem('settings_backup');
-      if (settingsRaw) setSettings(JSON.parse(settingsRaw));
-
       const activeSession = localStorage.getItem('active_client_session');
       if (activeSession) {
-        const userObj = JSON.parse(activeSession);
+        const userObj: UserProfile = JSON.parse(activeSession);
         setCurrentUser(userObj);
 
-        // Fetch latest store data from server if local is empty or to reconcile
-        if (userObj?.uid) {
-          fetch(`/api/sync/${userObj.uid}`)
-            .then(r => r.json())
-            .then(res => {
-              if (res.success && res.data) {
-                if (Array.isArray(res.data.products) && res.data.products.length > 0) {
-                  setProducts(prev => prev.length === 0 ? res.data.products : prev);
-                  if (!itemsRaw) {
-                    try { localStorage.setItem('items_backup', JSON.stringify(res.data.products)); } catch (e) {}
-                  }
-                }
-                if (Array.isArray(res.data.invoices) && res.data.invoices.length > 0) {
-                  setInvoices(prev => prev.length === 0 ? res.data.invoices : prev);
-                }
-                if (Array.isArray(res.data.customers) && res.data.customers.length > 0) {
-                  setCustomers(prev => prev.length === 0 ? res.data.customers : prev);
-                }
-                if (res.data.settings && !settingsRaw) {
-                  setSettings(prev => ({ ...prev, ...res.data.settings }));
-                }
-              }
-            })
-            .catch(() => {});
-        }
+        // Load isolated cache for this specific user if available
+        const userItems = localStorage.getItem(`items_backup_${userObj.uid}`);
+        if (userItems) setProducts(JSON.parse(userItems));
+
+        const userInvoices = localStorage.getItem(`invoices_backup_${userObj.uid}`);
+        if (userInvoices) setInvoices(JSON.parse(userInvoices));
+
+        const userCustomers = localStorage.getItem(`customers_backup_${userObj.uid}`);
+        if (userCustomers) setCustomers(JSON.parse(userCustomers));
+
+        const userSettings = localStorage.getItem(`settings_backup_${userObj.uid}`);
+        if (userSettings) setSettings(JSON.parse(userSettings));
+      } else {
+        // Clean state for unauthenticated / new user
+        setProducts([]);
+        setInvoices([]);
+        setCustomers([]);
+        setPayments([]);
+        setSettings(defaultEmptySettings);
       }
     } catch (e) {
-      console.warn("Local storage backup read notice:", e);
+      console.warn("Session restore notice:", e);
     } finally {
       setAuthLoading(false);
     }
   }, []);
 
-  // 2. Real-time Listeners (READ ONLY - NO WRITES to prevent infinite loop)
+  // 2. Real-time Listeners per User (Strictly isolated by where('ownerUid', '==', currentUser.uid))
   useEffect(() => {
-    // A) Listen to items (products) collection
-    const unsubItems = onSnapshot(collection(db, 'items'), (snapshot) => {
+    if (!currentUser?.uid) {
+      setProducts([]);
+      setInvoices([]);
+      setCustomers([]);
+      setPayments([]);
+      setSettings(defaultEmptySettings);
+      return;
+    }
+
+    const currentUid = currentUser.uid;
+
+    // A) Products (items) listener with where('ownerUid', '==', currentUid)
+    const qItems = query(collection(db, 'items'), where('ownerUid', '==', currentUid));
+    const unsubItems = onSnapshot(qItems, (snapshot) => {
       const list = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Product));
+
+      // Exception: Seed legacy Muntazar account (0A6uEqBONPdjOjAEFO0pgfyTs082) if Firestore is currently empty
+      if (currentUid === LEGACY_ACCOUNT_UID && list.length === 0 && !hasSeededLegacyRef.current) {
+        hasSeededLegacyRef.current = true;
+        setProducts(LEGACY_PRODUCTS);
+        // Async background seed to Firestore
+        LEGACY_PRODUCTS.forEach((prod) => {
+          setDoc(doc(db, 'items', prod.id), sanitizeForFirestore(prod), { merge: true }).catch(() => {});
+        });
+        return;
+      }
+
       setProducts(list);
       try {
-        localStorage.setItem('items_backup', JSON.stringify(list));
+        localStorage.setItem(`items_backup_${currentUid}`, JSON.stringify(list));
       } catch (e) {}
+
       setIsCloudConnected(true);
       const now = new Date();
       setLastSyncTime(now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -194,52 +215,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsCloudConnected(false);
     });
 
-    // B) Listen to invoices collection
-    const unsubInvoices = onSnapshot(collection(db, 'invoices'), (snapshot) => {
+    // B) Invoices listener with where('ownerUid', '==', currentUid)
+    const qInvoices = query(collection(db, 'invoices'), where('ownerUid', '==', currentUid));
+    const unsubInvoices = onSnapshot(qInvoices, (snapshot) => {
       const list = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Invoice));
+
+      if (currentUid === LEGACY_ACCOUNT_UID && list.length === 0 && !hasSeededLegacyRef.current) {
+        setInvoices(LEGACY_INVOICES);
+        LEGACY_INVOICES.forEach((inv) => {
+          setDoc(doc(db, 'invoices', inv.id), sanitizeForFirestore(inv), { merge: true }).catch(() => {});
+        });
+        return;
+      }
+
       setInvoices(list);
       try {
-        localStorage.setItem('invoices_backup', JSON.stringify(list));
+        localStorage.setItem(`invoices_backup_${currentUid}`, JSON.stringify(list));
       } catch (e) {}
-      setIsCloudConnected(true);
     }, (err) => {
       console.warn("Firestore invoices onSnapshot notice:", err);
     });
 
-    // C) Listen to customers collection
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+    // C) Customers listener with where('ownerUid', '==', currentUid)
+    const qCustomers = query(collection(db, 'customers'), where('ownerUid', '==', currentUid));
+    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       const list = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Customer));
+
+      if (currentUid === LEGACY_ACCOUNT_UID && list.length === 0 && !hasSeededLegacyRef.current) {
+        setCustomers(LEGACY_CUSTOMERS);
+        LEGACY_CUSTOMERS.forEach((cust) => {
+          setDoc(doc(db, 'customers', cust.id), sanitizeForFirestore(cust), { merge: true }).catch(() => {});
+        });
+        return;
+      }
+
       setCustomers(list);
       try {
-        localStorage.setItem('customers_backup', JSON.stringify(list));
+        localStorage.setItem(`customers_backup_${currentUid}`, JSON.stringify(list));
       } catch (e) {}
-      setIsCloudConnected(true);
     }, (err) => {
       console.warn("Firestore customers onSnapshot notice:", err);
     });
 
-    // D) Listen to store settings document
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'store_settings'), (docSnap) => {
+    // D) Store Settings listener: doc(db, 'stores', user.uid, 'settings', 'config')
+    const settingsDocRef = doc(db, 'stores', currentUid, 'settings', 'config');
+    const unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const cloudSettings = docSnap.data() as StoreSettings;
-        setSettings(prev => ({ ...prev, ...cloudSettings }));
+        setSettings(cloudSettings);
         try {
-          localStorage.setItem('settings_backup', JSON.stringify(cloudSettings));
+          localStorage.setItem(`settings_backup_${currentUid}`, JSON.stringify(cloudSettings));
+        } catch (e) {}
+      } else {
+        // Initialize distinct store settings for this specific user
+        const initialStoreSettings: StoreSettings = currentUid === LEGACY_ACCOUNT_UID
+          ? LEGACY_SETTINGS
+          : {
+              ...defaultEmptySettings,
+              storeName: currentUser.storeName || `مخزن ${currentUser.username}`,
+              ownerName: currentUser.displayName || '',
+              phone: currentUser.phone || '',
+            };
+
+        setSettings(initialStoreSettings);
+        setDoc(settingsDocRef, sanitizeForFirestore(initialStoreSettings), { merge: true }).catch(() => {});
+        try {
+          localStorage.setItem(`settings_backup_${currentUid}`, JSON.stringify(initialStoreSettings));
         } catch (e) {}
       }
     }, (err) => {
       console.warn("Firestore settings onSnapshot notice:", err);
     });
 
+    // E) Payments listener with where('ownerUid', '==', currentUid)
+    const qPayments = query(collection(db, 'payments'), where('ownerUid', '==', currentUid));
+    const unsubPayments = onSnapshot(qPayments, (snapshot) => {
+      const list = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as PaymentRecord));
+      setPayments(list);
+    }, () => {});
+
     return () => {
       unsubItems();
       unsubInvoices();
       unsubCustomers();
       unsubSettings();
+      unsubPayments();
     };
-  }, []);
+  }, [currentUser?.uid]);
 
-  // 3. Manual sync / status check (NO write loops)
+  // Manual sync status trigger
   const syncNow = async () => {
     setIsSyncing(true);
     setSyncNotice(null);
@@ -260,41 +324,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // 4. EVENT-DRIVEN WRITES ONLY (Direct user action -> Firestore)
-
-  // Product CRUD
+  // Product CRUD (Mandatory ownerUid injection)
   const addProduct = (prodData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Product => {
+    const ownerUid = currentUser?.uid || 'guest';
     const now = new Date().toISOString();
     const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const newProduct: Product = {
       ...prodData,
       id: newId,
+      ownerUid,
       code: prodData.code.trim() || `${1000 + products.length + 1}`,
       createdAt: now,
       updatedAt: now,
     };
 
-    // Direct write to Firestore collection 'items' (Atomic persistent offline/online sync)
     setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct), { merge: true }).catch(err => {
       console.warn("Firestore add product notice:", err);
     });
 
-    setProducts(prev => {
-      const updated = [newProduct, ...prev];
-      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
-
-    // Sync to server backend
-    const uid = currentUser?.uid;
-    if (uid) {
-      fetch(`/api/sync/${uid}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: [newProduct, ...products], invoices, customers, settings })
-      }).catch(() => {});
-    }
-
+    setProducts(prev => [newProduct, ...prev]);
     return newProduct;
   };
 
@@ -302,6 +350,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     itemsData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[],
     onProgress?: (curr: number, total: number) => void
   ): Promise<{ success: boolean; count: number; products: Product[] }> => {
+    const ownerUid = currentUser?.uid || 'guest';
     const now = new Date().toISOString();
     const createdList: Product[] = [];
     const total = itemsData.length;
@@ -312,12 +361,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const fullProd: Product = {
         ...item,
         id: newId,
+        ownerUid,
         createdAt: now,
         updatedAt: now,
       };
       createdList.push(fullProd);
 
-      // Non-blocking fire-and-forget write to Firestore so offline/latency never freezes execution
       setDoc(doc(db, 'items', newId), sanitizeForFirestore(fullProd), { merge: true }).catch(err => {
         console.warn("Firestore bulk add item sync notice:", err);
       });
@@ -327,62 +376,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    let allUpdated: Product[] = [];
-    setProducts(prev => {
-      allUpdated = [...createdList, ...prev];
-      try {
-        localStorage.setItem('items_backup', JSON.stringify(allUpdated));
-      } catch (e) {}
-      return allUpdated;
-    });
-
-    // Also sync updated store data to server endpoint
-    const uid = currentUser?.uid;
-    if (uid) {
-      try {
-        fetch(`/api/sync/${uid}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            products: allUpdated.length > 0 ? allUpdated : [...createdList, ...products],
-            invoices,
-            customers,
-            settings
-          })
-        }).catch(() => {});
-      } catch (e) {}
-    }
-
+    setProducts(prev => [...createdList, ...prev]);
     return { success: true, count: createdList.length, products: createdList };
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
     const now = new Date().toISOString();
-    const finalUpdates = { ...updates, updatedAt: now };
+    const finalUpdates = { 
+      ...updates, 
+      ownerUid: currentUser?.uid || 'guest',
+      updatedAt: now 
+    };
 
-    // Direct write to Firestore collection 'items'
     setDoc(doc(db, 'items', id), sanitizeForFirestore(finalUpdates), { merge: true }).catch(err => {
       console.warn("Firestore update product notice:", err);
     });
 
-    setProducts(prev => {
-      const updated = prev.map(item => item.id === id ? { ...item, ...finalUpdates } : item);
-      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    setProducts(prev => prev.map(item => item.id === id ? { ...item, ...finalUpdates } : item));
   };
 
   const deleteProduct = (id: string) => {
-    // Direct delete from Firestore collection 'items'
     deleteDoc(doc(db, 'items', id)).catch(err => {
       console.warn("Firestore delete product notice:", err);
     });
 
-    setProducts(prev => {
-      const updated = prev.filter(item => item.id !== id);
-      try { localStorage.setItem('items_backup', JSON.stringify(updated)); } catch (e) {}
-      return updated;
-    });
+    setProducts(prev => prev.filter(item => item.id !== id));
   };
 
   const adjustStock = (id: string, delta: number) => {
@@ -395,11 +413,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Customer CRUD
+  // Customer CRUD (Mandatory ownerUid injection)
   const addCustomer = (data: Omit<Customer, 'id' | 'createdAt' | 'totalDebt'> & { initialDebt?: number }): Customer => {
+    const ownerUid = currentUser?.uid || 'guest';
     const newId = 'cust_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const newCustomer: Customer = {
       id: newId,
+      ownerUid,
       name: data.name.trim(),
       phone: data.phone.trim(),
       address: data.address?.trim() || '',
@@ -408,9 +428,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
 
-    // Direct write to Firestore collection 'customers'
     setDoc(doc(db, 'customers', newId), sanitizeForFirestore(newCustomer)).catch(err => {
-      console.error("Firestore add customer error:", err);
+      console.warn("Firestore add customer notice:", err);
     });
 
     setCustomers(prev => [newCustomer, ...prev]);
@@ -418,25 +437,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
-    // Direct write to Firestore collection 'customers'
-    setDoc(doc(db, 'customers', id), sanitizeForFirestore(updates), { merge: true }).catch(err => {
-      console.error("Firestore update customer error:", err);
+    const payload = {
+      ...updates,
+      ownerUid: currentUser?.uid || 'guest',
+    };
+    setDoc(doc(db, 'customers', id), sanitizeForFirestore(payload), { merge: true }).catch(err => {
+      console.warn("Firestore update customer notice:", err);
     });
 
     setCustomers(prev => prev.map(cust => cust.id === id ? { ...cust, ...updates } : cust));
   };
 
   const deleteCustomer = (id: string) => {
-    // Direct delete from Firestore collection 'customers'
     deleteDoc(doc(db, 'customers', id)).catch(err => {
-      console.error("Firestore delete customer error:", err);
+      console.warn("Firestore delete customer notice:", err);
     });
 
     setCustomers(prev => prev.filter(cust => cust.id !== id));
   };
 
-  // Invoicing CRUD
+  // Invoicing CRUD (Mandatory ownerUid injection)
   const createInvoice = (data: CreateInvoiceInput): Invoice => {
+    const ownerUid = currentUser?.uid || 'guest';
     const now = new Date().toISOString();
     const dateYear = new Date().getFullYear();
     const countToday = invoices.length + 1;
@@ -469,6 +491,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newInvoice: Invoice = {
       id: newId,
+      ownerUid,
       invoiceNumber,
       date: now,
       type: data.type,
@@ -490,19 +513,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       netProfit,
     };
 
-    // 1. Direct write invoice to Firestore collection 'invoices' with complete sanitation
-    const firestoreInvoicePayload = sanitizeForFirestore(newInvoice);
-    setDoc(doc(db, 'invoices', newId), firestoreInvoicePayload).catch(err => {
-      console.error("Firestore add invoice error:", err);
+    setDoc(doc(db, 'invoices', newId), sanitizeForFirestore(newInvoice)).catch(err => {
+      console.warn("Firestore add invoice notice:", err);
     });
 
-    // 2. Deduct stock for each sold item directly
+    // Deduct stock for each sold item
     items.forEach((item: InvoiceItem) => {
       const deduction = item.deductedPieces ?? item.quantity;
       adjustStock(item.productId, -deduction);
     });
 
-    // 3. Update customer debt if credit invoice
+    // Update customer debt if credit invoice
     if (data.type === 'credit' && data.customerId && remainingAmount > 0) {
       updateDoc(doc(db, 'customers', data.customerId), sanitizeForFirestore({ totalDebt: currentTotalDebt })).catch(() => {});
       setCustomers(prev =>
@@ -518,9 +539,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const inv = invoices.find(i => i.id === id);
     if (!inv) return;
 
-    // Direct delete from Firestore collection 'invoices'
     deleteDoc(doc(db, 'invoices', id)).catch(err => {
-      console.error("Firestore delete invoice error:", err);
+      console.warn("Firestore delete invoice notice:", err);
     });
 
     // Restore stock
@@ -546,28 +566,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setInvoices(prev => prev.filter(i => i.id !== id));
   };
 
-  // إرجاع القائمة / مشتريات الزبون المتراجع عن الشراء
+  // Return invoice
   const returnInvoice = async (id: string): Promise<boolean> => {
     const inv = invoices.find(i => i.id === id);
     if (!inv) return false;
-    if (inv.status === 'returned') return false; // تم إرجاعها مسبقاً
+    if (inv.status === 'returned') return false;
 
     try {
-      // 1. إعادة كميات المواد المباعة إلى رصيد المخزن تلقائياً
       inv.items.forEach((item: InvoiceItem) => {
         const returnPieces = item.deductedPieces ?? item.quantity;
         adjustStock(item.productId, returnPieces);
       });
 
-      // 2. إذا كانت القائمة دين (آجلة)، نقوم بإنقاص دين العميل بالمبلغ المتبقي غير المسدد
       if (inv.type === 'credit' && inv.customerId && inv.remainingAmount > 0) {
         setCustomers(prev =>
           prev.map(c => {
             if (c.id === inv.customerId) {
               const adjustedDebt = Math.max(0, c.totalDebt - inv.remainingAmount);
-              updateDoc(doc(db, 'customers', inv.customerId!), sanitizeForFirestore({ totalDebt: adjustedDebt })).catch(err => {
-                console.error("Firestore revert customer debt error:", err);
-              });
+              updateDoc(doc(db, 'customers', inv.customerId!), sanitizeForFirestore({ totalDebt: adjustedDebt })).catch(() => {});
               return { ...c, totalDebt: adjustedDebt };
             }
             return c;
@@ -575,7 +591,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         );
       }
 
-      // 3. تحديث حالة الفاتورة في السحاب والمحلي إلى 'returned' (مرتجعة)
       const updatedNotes = inv.notes 
         ? `${inv.notes} | [تم إرجاع القائمة واسترداد المواد بتاريخ ${new Date().toLocaleDateString('ar-EG')}]`
         : `[تم إرجاع القائمة واسترداد المواد بالكامل إلى المخزن بتاريخ ${new Date().toLocaleDateString('ar-EG')}]`;
@@ -600,7 +615,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // ميزة تصعيد أو تعديل أسعار كافة المواد بنسبة مئوية (مثلاً +15% أو +20% أو -10%)
+  // Bulk Price Adjustment
   const applyBulkPriceAdjustment = async (
     percentage: number,
     priceTargets: { retail: boolean; wholesale: boolean; cost: boolean },
@@ -615,7 +630,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const roundPrice = (val: number): number => {
       if (!roundToHundreds) return Math.round(val);
-      // تقريب لأقرب 250 أو 500 أو 100 دينار / سنت حسب القيمة لتكون الأسعار تجارية أنيقة
       if (val >= 1000) {
         return Math.round(val / 250) * 250;
       }
@@ -647,17 +661,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         count++;
         const updatedItem: Product = {
           ...prod,
+          ownerUid: currentUser?.uid || 'guest',
           retailPrice: newRetail,
           wholesalePrice: newWholesale,
           costPrice: newCost,
           updatedAt: new Date().toISOString(),
         };
 
-        // تحديث مباشر في Firestore
-        setDoc(doc(db, 'items', prod.id), sanitizeForFirestore(updatedItem)).catch(err => {
-          console.error(`Firestore update item ${prod.id} error:`, err);
-        });
-
+        setDoc(doc(db, 'items', prod.id), sanitizeForFirestore(updatedItem), { merge: true }).catch(() => {});
         return updatedItem;
       }
 
@@ -668,8 +679,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { updatedCount: count };
   };
 
-  // Payment Recording
+  // Payment Recording (Mandatory ownerUid injection)
   const recordPayment = (customerId: string, amount: number, notes?: string): PaymentRecord => {
+    const ownerUid = currentUser?.uid || 'guest';
     const customer = customers.find(c => c.id === customerId);
     const count = payments.length + 1;
     const receiptNumber = `REC-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
@@ -677,6 +689,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newPayment: PaymentRecord = {
       id: newId,
+      ownerUid,
       customerId,
       customerName: customer ? customer.name : 'عميل غير مسجل',
       amount,
@@ -693,23 +706,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    // Direct write to payments
     setDoc(doc(db, 'payments', newId), sanitizeForFirestore(newPayment)).catch(() => {});
     setPayments(prev => [newPayment, ...prev]);
     return newPayment;
   };
 
-  // Settings
+  // Store Settings (Per user at doc(db, 'stores', user.uid, 'settings', 'config'))
   const updateSettings = (newSettings: Partial<StoreSettings>) => {
+    if (!currentUser?.uid) return;
+    const currentUid = currentUser.uid;
+
     setSettings(prev => {
       const updated = { ...prev, ...newSettings };
-      // Direct write to Firestore doc 'settings/store_settings'
-      setDoc(doc(db, 'settings', 'store_settings'), sanitizeForFirestore(updated), { merge: true }).catch(err => {
-        console.error("Firestore update settings error:", err);
+      const settingsDocRef = doc(db, 'stores', currentUid, 'settings', 'config');
+      setDoc(settingsDocRef, sanitizeForFirestore(updated), { merge: true }).catch(err => {
+        console.warn("Firestore update settings notice:", err);
       });
+
       try {
-        localStorage.setItem('settings_backup', JSON.stringify(updated));
+        localStorage.setItem(`settings_backup_${currentUid}`, JSON.stringify(updated));
       } catch (e) {}
+
       return updated;
     });
   };
@@ -725,7 +742,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const exportDataJSON = (): string => {
     const backup = {
-      version: '2.0',
+      version: '3.0',
+      ownerUid: currentUser?.uid,
       exportDate: new Date().toISOString(),
       products,
       customers,
@@ -739,24 +757,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const importDataJSON = (jsonStr: string): { success: boolean; error?: string } => {
     try {
       const data = JSON.parse(jsonStr);
+      const ownerUid = currentUser?.uid || 'guest';
+
       if (Array.isArray(data.products)) {
-        setProducts(data.products);
-        data.products.forEach((p: Product) => setDoc(doc(db, 'items', p.id), sanitizeForFirestore(p)).catch(() => {}));
+        const mapped = data.products.map((p: any) => ({ ...p, ownerUid }));
+        setProducts(mapped);
+        mapped.forEach((p: Product) => setDoc(doc(db, 'items', p.id), sanitizeForFirestore(p)).catch(() => {}));
       }
       if (Array.isArray(data.customers)) {
-        setCustomers(data.customers);
-        data.customers.forEach((c: Customer) => setDoc(doc(db, 'customers', c.id), sanitizeForFirestore(c)).catch(() => {}));
+        const mapped = data.customers.map((c: any) => ({ ...c, ownerUid }));
+        setCustomers(mapped);
+        mapped.forEach((c: Customer) => setDoc(doc(db, 'customers', c.id), sanitizeForFirestore(c)).catch(() => {}));
       }
       if (Array.isArray(data.invoices)) {
-        setInvoices(data.invoices);
-        data.invoices.forEach((inv: Invoice) => setDoc(doc(db, 'invoices', inv.id), sanitizeForFirestore(inv)).catch(() => {}));
+        const mapped = data.invoices.map((inv: any) => ({ ...inv, ownerUid }));
+        setInvoices(mapped);
+        mapped.forEach((inv: Invoice) => setDoc(doc(db, 'invoices', inv.id), sanitizeForFirestore(inv)).catch(() => {}));
       }
       if (Array.isArray(data.payments)) {
-        setPayments(data.payments);
+        const mapped = data.payments.map((pay: any) => ({ ...pay, ownerUid }));
+        setPayments(mapped);
       }
-      if (data.settings) {
+      if (data.settings && currentUser?.uid) {
         setSettings(prev => ({ ...prev, ...data.settings }));
-        setDoc(doc(db, 'settings', 'store_settings'), sanitizeForFirestore(data.settings), { merge: true }).catch(() => {});
+        setDoc(doc(db, 'stores', currentUser.uid, 'settings', 'config'), sanitizeForFirestore(data.settings), { merge: true }).catch(() => {});
       }
       return { success: true };
     } catch (err: any) {
@@ -768,17 +792,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return `${amount.toLocaleString('en-US')} ${settings.currency}`;
   };
 
+  // Login: Instantly isolates and switches user context
   const loginUser = async (user: any) => {
+    // Purge previous store memory immediately to guarantee zero data inheritance
+    setProducts([]);
+    setInvoices([]);
+    setCustomers([]);
+    setPayments([]);
+
     setCurrentUser(user);
     setAuthLoading(false);
   };
 
+  // Logout: Purges all store data from memory and removes active session
   const logout = async () => {
     setCurrentUser(null);
-    try {
-      localStorage.removeItem('active_client_session');
-      localStorage.removeItem('last_active_user_uid');
-    } catch (e) {}
+    setProducts([]);
+    setInvoices([]);
+    setCustomers([]);
+    setPayments([]);
+    setSettings(defaultEmptySettings);
     await logoutAccount();
   };
 

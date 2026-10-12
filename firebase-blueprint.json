@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Store item/product with prices, stock, and carton details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string", "description": "Owner store identifier for complete tenant isolation" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "costPrice": { "type": "number" },
+        "retailPrice": { "type": "number" },
+        "wholesalePrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "piecesPerCarton": { "type": "number" },
+        "minStock": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "ownerUid", "code", "name", "costPrice", "retailPrice", "stock"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Sales invoice (direct cash or credit debt)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string", "description": "Owner store identifier for complete tenant isolation" },
+        "invoiceNumber": { "type": "string" },
+        "type": { "type": "string", "enum": ["direct", "credit"] },
+        "customerName": { "type": "string" },
+        "total": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "partial", "unpaid", "returned"] },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "ownerUid", "invoiceNumber", "type", "total", "paidAmount", "date"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer record with accumulated debt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerUid": { "type": "string", "description": "Owner store identifier for complete tenant isolation" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "totalDebt": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "ownerUid", "name", "totalDebt"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Independent store branding, layout, currency and print configurations",
+      "type": "object",
+      "properties": {
+        "storeName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "currency": { "type": "string" },
+        "invoiceFooterNote": { "type": "string" },
+        "printFormat": { "type": "string", "enum": ["a4", "thermal"] },
+        "enableWholesale": { "type": "boolean" },
+        "deviceMode": { "type": "string", "enum": ["desktop", "mobile"] },
+        "desktopLayout": { "type": "string", "enum": ["full", "partial"] }
+      },
+      "required": ["storeName", "currency"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered system user account",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "storeName": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "client"] },
+        "isActive": { "type": "boolean" },
+        "password": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "role"]
+    }
+  },
+  "firestore": {
+    "/items/{itemId}": {
+      "schema": { "$ref": "Product" },
+      "description": "Products collection filtered per tenant via where('ownerUid', '==', user.uid)"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": { "$ref": "Invoice" },
+      "description": "Sales invoices collection filtered per tenant via where('ownerUid', '==', user.uid)"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "Customer" },
+      "description": "Customer debts collection filtered per tenant via where('ownerUid', '==', user.uid)"
+    },
+    "/stores/{userId}/settings/config": {
+      "schema": { "$ref": "StoreSettings" },
+      "description": "Completely independent store configuration per user"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "UserProfile" },
+      "description": "User account credentials and roles in Firestore"
+    }
+  }
+}

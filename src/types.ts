@@ -4,6 +4,7 @@ export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'returned';
 
 export interface Product {
   id: string;
+  ownerUid?: string; // معرّف صاحب المتجر للعزل التام
   code: string; // كود المادة أو الباركود
   name: string; // اسم المادة
   category: string; // التصنيف (غذائية، إنشائية، كهربائية، أدوات منزلية، إلخ)
@@ -23,6 +24,7 @@ export type Item = Product;
 
 export interface Customer {
   id: string;
+  ownerUid?: string; // معرّف صاحب المتجر للعزل التام
   name: string;
   phone: string;
   address?: string;
@@ -49,6 +51,7 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string;
+  ownerUid?: string; // معرّف صاحب المتجر للعزل التام
   invoiceNumber: string; // رقم القائمة
   type: SaleType; // مباشر أم آجل
   customerId?: string;
@@ -84,6 +87,7 @@ export interface CreateInvoiceInput {
 
 export interface PaymentRecord {
   id: string;
+  ownerUid?: string;
   customerId: string;
   customerName: string;
   amount: number;

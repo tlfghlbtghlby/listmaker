@@ -1,0 +1,332 @@
+import { Product, Invoice, Customer, StoreSettings } from '../types';
+
+export const LEGACY_ACCOUNT_UID = '0A6uEqBONPdjOjAEFO0pgfyTs082';
+
+export const LEGACY_PRODUCTS: Product[] = [
+  {
+    id: "prod_1791702219890_cims",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "تمن محمد",
+    code: "1009",
+    category: "مواد غذائية",
+    unit: "قطعة",
+    costPrice: 3000,
+    retailPrice: 3500,
+    wholesalePrice: 3500,
+    stock: 100,
+    piecesPerCarton: 20,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-11T07:03:39.890Z",
+    updatedAt: "2026-10-11T07:03:39.890Z"
+  },
+  {
+    id: "prod_1791636569235_4ilh",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "تجربة",
+    code: "1008",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 0.75,
+    retailPrice: 1.33,
+    wholesalePrice: 1.33,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T12:49:29.234Z",
+    updatedAt: "2026-10-10T12:49:29.234Z"
+  },
+  {
+    id: "prod_1791630607443_fqrp",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "بسكت نجمة",
+    code: "8691720452808",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 416.67,
+    retailPrice: 500,
+    wholesalePrice: 500,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T11:10:07.443Z",
+    updatedAt: "2026-10-10T11:10:07.443Z"
+  },
+  {
+    id: "prod_1791628818853_g9v6",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "543",
+    code: "1006",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 0.08,
+    retailPrice: 0.25,
+    wholesalePrice: 0.25,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T10:40:18.853Z",
+    updatedAt: "2026-10-10T10:40:18.853Z"
+  },
+  {
+    id: "prod_1791628727905_w2ej",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "eww",
+    code: "1005",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 0.5,
+    retailPrice: 0.67,
+    wholesalePrice: 0.67,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T10:38:47.905Z",
+    updatedAt: "2026-10-10T10:38:47.905Z"
+  },
+  {
+    id: "prod_1791618662700_9n1r",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "...",
+    code: "1004",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 83.25,
+    retailPrice: 7.33,
+    wholesalePrice: 7.33,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T07:51:02.700Z",
+    updatedAt: "2026-10-10T07:51:02.700Z"
+  },
+  {
+    id: "prod_1791615993290_kleenex",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "كلينس",
+    code: "6931149446227",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 833.33,
+    retailPrice: 10000,
+    wholesalePrice: 10000,
+    stock: 60,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T07:00:00.000Z",
+    updatedAt: "2026-10-10T07:00:00.000Z"
+  },
+  {
+    id: "prod_1791615993290_mfrj",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "كدد",
+    code: "1002",
+    category: "عام",
+    unit: "قطعة",
+    costPrice: 8.33,
+    retailPrice: 8.25,
+    wholesalePrice: 8.25,
+    stock: 59,
+    piecesPerCarton: 12,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-10T07:06:33.290Z",
+    updatedAt: "2026-10-10T07:06:42.460Z"
+  },
+  {
+    id: "prod_1791315286628_7x1s",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "...",
+    code: "1001",
+    category: "مواد غذائية",
+    unit: "قطعة",
+    costPrice: 2066,
+    retailPrice: 39699,
+    wholesalePrice: 39699,
+    stock: 112,
+    piecesPerCarton: 6,
+    minStock: 6,
+    notes: "",
+    createdAt: "2026-10-06T19:34:46.628Z",
+    updatedAt: "2026-10-10T07:06:42.461Z"
+  }
+];
+
+export const LEGACY_INVOICES: Invoice[] = [
+  {
+    id: "inv_1791616002459_anvw",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    invoiceNumber: "INV-2026-0004",
+    type: "direct",
+    customerName: "زبون نقدي مباشر",
+    customerPhone: "",
+    items: [
+      {
+        productId: "prod_1791615993290_mfrj",
+        quantity: 1,
+        total: 8.25,
+        code: "1002",
+        unitPrice: 8.25,
+        productName: "كدد",
+        unit: "قطعة",
+        costPrice: 8.33,
+        priceType: "retail"
+      },
+      {
+        productName: "...",
+        priceType: "retail",
+        costPrice: 2066,
+        code: "1001",
+        unitPrice: 39699,
+        unit: "قطعة",
+        total: 39699,
+        productId: "prod_1791315286628_7x1s",
+        quantity: 1
+      }
+    ],
+    subtotal: 39707.25,
+    discount: 0,
+    total: 39707.25,
+    paidAmount: 39707.25,
+    remainingAmount: 0,
+    previousDebt: 0,
+    currentTotalDebt: 0,
+    status: "paid",
+    notes: "",
+    date: "2026-10-10T07:06:42.459Z",
+    totalCost: 2074.33,
+    netProfit: 37632.92
+  },
+  {
+    id: "inv_1791615404435_x1f2",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    invoiceNumber: "INV-2026-0003",
+    type: "direct",
+    customerName: "زبون نقدي مباشر",
+    customerPhone: "",
+    items: [
+      {
+        unitPrice: 39699,
+        unit: "قطعة",
+        productId: "prod_1791315286628_7x1s",
+        costPrice: 2066,
+        priceType: "retail",
+        productName: "...",
+        quantity: 2,
+        code: "1001",
+        total: 79398
+      }
+    ],
+    subtotal: 79398,
+    discount: 0,
+    total: 79398,
+    paidAmount: 79398,
+    remainingAmount: 0,
+    previousDebt: 0,
+    currentTotalDebt: 0,
+    status: "paid",
+    notes: "",
+    date: "2026-10-10T06:56:44.435Z",
+    totalCost: 4132,
+    netProfit: 75266
+  },
+  {
+    id: "inv_1791322430910_viny",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    invoiceNumber: "INV-2026-0002",
+    type: "direct",
+    customerName: "زبون نقدي مباشر",
+    customerPhone: "",
+    items: [
+      {
+        unitPrice: 39699,
+        code: "1001",
+        productName: "...",
+        productId: "prod_1791315286628_7x1s",
+        total: 79398,
+        costPrice: 2066,
+        quantity: 2,
+        priceType: "retail",
+        unit: "قطعة"
+      }
+    ],
+    subtotal: 79398,
+    discount: 0,
+    total: 79398,
+    paidAmount: 79398,
+    remainingAmount: 0,
+    previousDebt: 0,
+    currentTotalDebt: 0,
+    status: "paid",
+    notes: "",
+    date: "2026-10-06T21:33:50.909Z",
+    totalCost: 4132,
+    netProfit: 75266
+  },
+  {
+    id: "inv_1791322231880_a960",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    invoiceNumber: "INV-2026-0001",
+    type: "credit",
+    customerName: "أحمد",
+    customerPhone: "",
+    items: [
+      {
+        costPrice: 2066,
+        unit: "قطعة",
+        priceType: "retail",
+        quantity: 3,
+        productId: "prod_1791315286628_7x1s",
+        code: "1001",
+        total: 119097,
+        unitPrice: 39699,
+        productName: "..."
+      }
+    ],
+    subtotal: 119097,
+    discount: 0,
+    total: 119097,
+    paidAmount: 0,
+    remainingAmount: 119097,
+    previousDebt: 0,
+    currentTotalDebt: 119097,
+    paymentDueDate: "2026-10-21",
+    status: "unpaid",
+    notes: "",
+    date: "2026-10-06T21:30:31.880Z",
+    totalCost: 6198,
+    netProfit: 112899
+  }
+];
+
+export const LEGACY_CUSTOMERS: Customer[] = [
+  {
+    id: "cust_1791353382245_ywxw",
+    ownerUid: LEGACY_ACCOUNT_UID,
+    name: "محمد علي",
+    phone: "",
+    address: "",
+    totalDebt: 0,
+    notes: "",
+    createdAt: "2026-10-07T06:09:42.245Z"
+  }
+];
+
+export const LEGACY_SETTINGS: StoreSettings = {
+  storeName: "انشائية المسعودي",
+  ownerName: "انشائية المسعودي",
+  phone: "",
+  address: "",
+  currency: "دينار",
+  invoiceFooterNote: "شكراً لتعاملكم معنا",
+  printFormat: "a4",
+  enableWholesale: false,
+  deviceMode: "desktop",
+  desktopLayout: "full"
+};
