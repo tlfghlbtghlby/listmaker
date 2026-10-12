@@ -19,7 +19,7 @@ jobs:
         node-version: 20
 
     - name: Install Dependencies
-      run: npm install
+      run: npm install --legacy-peer-deps
 
     - name: Build Web & Windows Installer
       run: npm run electron:build
