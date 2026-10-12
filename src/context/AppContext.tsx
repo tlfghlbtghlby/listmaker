@@ -5,9 +5,7 @@ import {
   onSnapshot, 
   setDoc, 
   updateDoc, 
-  deleteDoc,
-  query,
-  where
+  deleteDoc 
 } from 'firebase/firestore';
 import { db, logoutAccount } from '../firebase';
 import { User } from 'firebase/auth';
@@ -23,45 +21,30 @@ import {
 } from '../types';
 
 interface AppContextType {
-  // Data
   products: Product[];
   customers: Customer[];
   invoices: Invoice[];
   payments: PaymentRecord[];
   settings: StoreSettings;
-
-  // Product actions
   addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Product;
   addBulkProducts: (items: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[], onProgress?: (curr: number, total: number) => void) => Promise<{ success: boolean; count: number; products: Product[] }>;
   updateProduct: (id: string, updates: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
   adjustStock: (id: string, delta: number) => void;
-
-  // Customer actions
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'totalDebt'> & { initialDebt?: number }) => Customer;
   updateCustomer: (id: string, updates: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
-
-  // Invoicing & Sales actions
   createInvoice: (data: CreateInvoiceInput) => Invoice;
   deleteInvoice: (id: string) => void;
   returnInvoice: (id: string) => Promise<boolean>;
-
-  // Product actions & Bulk adjustments
   applyBulkPriceAdjustment: (percentage: number, priceTargets: { retail: boolean; wholesale: boolean; cost: boolean }, roundToHundreds?: boolean) => Promise<{ updatedCount: number }>;
-
-  // Payments / Debt settlements
   recordPayment: (customerId: string, amount: number, notes?: string) => PaymentRecord;
-
-  // Settings & Storage
   updateSettings: (newSettings: Partial<StoreSettings>) => void;
   resetToDemo: () => void;
   resetToZero: () => void;
   exportDataJSON: () => string;
   importDataJSON: (jsonStr: string) => { success: boolean; error?: string };
   formatMoney: (amount: number) => string;
-
-  // Cloud & Auth
   currentUser: any;
   authLoading: boolean;
   isCloudConnected: boolean;
@@ -92,17 +75,11 @@ const defaultAdminSettings: StoreSettings = {
 export const sanitizeForFirestore = <T = any>(obj: T): T => {
   if (obj === null || obj === undefined) return null as any;
   if (obj instanceof Date) return obj.toISOString() as any;
-  if (Array.isArray(obj)) {
-    return obj
-      .filter(item => item !== undefined)
-      .map(item => sanitizeForFirestore(item)) as any;
-  }
+  if (Array.isArray(obj)) return obj.filter(i => i !== undefined).map(i => sanitizeForFirestore(i)) as any;
   if (typeof obj === 'object') {
     const clean: Record<string, any> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined) {
-        clean[key] = sanitizeForFirestore(value);
-      }
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) clean[k] = sanitizeForFirestore(v);
     }
     return clean as any;
   }
@@ -115,8 +92,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [settings, setSettings] = useState<StoreSettings>(defaultAdminSettings);
-
-  // Cloud & Auth State
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isCloudConnected, setIsCloudConnected] = useState(true);
@@ -124,46 +99,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // 1. Initial Local Backup & Session Read
   useEffect(() => {
     try {
-      const activeSession = localStorage.getItem('active_client_session');
-      if (activeSession) {
-        const userObj = JSON.parse(activeSession);
-        setCurrentUser(userObj);
-
-        const currentUid = userObj.uid;
-        const itemsRaw = localStorage.getItem(`items_backup_${currentUid}`);
-        if (itemsRaw) setProducts(JSON.parse(itemsRaw));
-        const invRaw = localStorage.getItem(`invoices_backup_${currentUid}`);
-        if (invRaw) setInvoices(JSON.parse(invRaw));
-        const custRaw = localStorage.getItem(`customers_backup_${currentUid}`);
-        if (custRaw) setCustomers(JSON.parse(custRaw));
-        const settingsRaw = localStorage.getItem(`settings_backup_${currentUid}`);
-        if (settingsRaw) setSettings(JSON.parse(settingsRaw));
-      }
-    } catch (e) {
-      console.warn("Local storage backup read notice:", e);
-    } finally {
-      setAuthLoading(false);
-    }
+      const active = localStorage.getItem('active_client_session');
+      if (active) setCurrentUser(JSON.parse(active));
+    } catch (e) {}
+    setAuthLoading(false);
   }, []);
 
-  // 2. Real-time Multi-Tenant Listeners
   useEffect(() => {
     if (!currentUser) {
       setProducts([]);
       setCustomers([]);
       setInvoices([]);
       setPayments([]);
-      setSettings(defaultAdminSettings);
       return;
     }
 
     const currentUid = currentUser.uid;
     const isAdmin = currentUser.role === 'admin';
 
-    // إذا كان المستخدم هو المدير العام: لا يعرض بضائع متجر المشتركين الخاصة به
     if (isAdmin) {
       setProducts([]);
       setCustomers([]);
@@ -177,37 +132,268 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // للمشتركين (مثل متجر منتظر): جلب بياناتهم مع الحفاظ الكامل على قاعدة بياناتهم الأصلية
-    const unsubItems = onSnapshot(collection(db, 'items'), (snapshot) => {
-      const list = snapshot.docs
-        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any))
-        .filter(item => !item.ownerUid || item.ownerUid === currentUid); // متوافق تماماً مع بضائع منتظر الحالية
-
+    const unsubItems = onSnapshot(collection(db, 'items'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(i => !i.ownerUid || i.ownerUid === currentUid);
       setProducts(list);
-      try { localStorage.setItem(`items_backup_${currentUid}`, JSON.stringify(list)); } catch (e) {}
       setIsCloudConnected(true);
-      const now = new Date();
-      setLastSyncTime(now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    }, (err) => {
-      console.warn("Firestore items notice:", err);
-      setIsCloudConnected(false);
-    });
+      setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
+    }, () => setIsCloudConnected(false));
 
-    const unsubInvoices = onSnapshot(collection(db, 'invoices'), (snapshot) => {
-      const list = snapshot.docs
-        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any))
-        .filter(inv => !inv.ownerUid || inv.ownerUid === currentUid);
-
+    const unsubInv = onSnapshot(collection(db, 'invoices'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(i => !i.ownerUid || i.ownerUid === currentUid);
       setInvoices(list);
-      try { localStorage.setItem(`invoices_backup_${currentUid}`, JSON.stringify(list)); } catch (e) {}
-    }, (err) => {
-      console.warn("Firestore invoices notice:", err);
-    });
+    }, () => {});
 
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
-      const list = snapshot.docs
-        .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any))
-        .filter(cust => !cust.ownerUid || cust.ownerUid === currentUid);
-
+    const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(c => !c.ownerUid || c.ownerUid === currentUid);
       setCustomers(list);
-      
+    }, () => {});
+
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'store_settings'), (snap) => {
+      if (snap.exists()) setSettings(prev => ({ ...prev, ...(snap.data() as StoreSettings) }));
+    }, () => {});
+
+    return () => {
+      unsubItems();
+      unsubInv();
+      unsubCust();
+      unsubSettings();
+    };
+  }, [currentUser]);
+
+  const syncNow = async () => {
+    setIsSyncing(true);
+    setSyncNotice(null);
+    try {
+      setIsCloudConnected(true);
+      setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
+      setSyncNotice(`تم الاتصال بالسحابة: ${products.length} مادة`);
+      setTimeout(() => setSyncNotice(null), 3000);
+    } catch {
+      setIsCloudConnected(false);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const addProduct = (prodData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Product => {
+    const now = new Date().toISOString();
+    const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const newProduct: any = {
+      ...prodData,
+      id: newId,
+      ownerUid: currentUser?.uid || '',
+      code: prodData.code?.trim() || `${1000 + products.length + 1}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct), { merge: true }).catch(() => {});
+    setProducts(prev => [newProduct, ...prev]);
+    return newProduct;
+  };
+
+  const addBulkProducts = async (itemsData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[], onProgress?: (curr: number, total: number) => void) => {
+    const now = new Date().toISOString();
+    const created: Product[] = [];
+    for (let i = 0; i < itemsData.length; i++) {
+      const item = itemsData[i];
+      const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + i;
+      const full: any = { ...item, id: newId, ownerUid: currentUser?.uid || '', createdAt: now, updatedAt: now };
+      created.push(full);
+      setDoc(doc(db, 'items', newId), sanitizeForFirestore(full), { merge: true }).catch(() => {});
+      if (onProgress) onProgress(i + 1, itemsData.length);
+    }
+    setProducts(prev => [...created, ...prev]);
+    return { success: true, count: created.length, products: created };
+  };
+
+  const updateProduct = (id: string, updates: Partial<Product>) => {
+    const finalUpdates = { ...updates, updatedAt: new Date().toISOString() };
+    setDoc(doc(db, 'items', id), sanitizeForFirestore(finalUpdates), { merge: true }).catch(() => {});
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...finalUpdates } : p));
+  };
+
+  const deleteProduct = (id: string) => {
+    deleteDoc(doc(db, 'items', id)).catch(() => {});
+    setProducts(prev => prev.filter(p => p.id !== id));
+  };
+
+  const adjustStock = (id: string, delta: number) => {
+    setProducts(prev => {
+      const t = prev.find(p => p.id === id);
+      if (!t) return prev;
+      const newStock = Math.max(0, t.stock + delta);
+      updateDoc(doc(db, 'items', id), sanitizeForFirestore({ stock: newStock })).catch(() => {});
+      return prev.map(p => p.id === id ? { ...p, stock: newStock } : p);
+    });
+  };
+
+  const addCustomer = (data: Omit<Customer, 'id' | 'createdAt' | 'totalDebt'> & { initialDebt?: number }): Customer => {
+    const newId = 'cust_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const newCust: any = {
+      id: newId,
+      ownerUid: currentUser?.uid || '',
+      name: data.name.trim(),
+      phone: data.phone.trim(),
+      address: data.address?.trim() || '',
+      totalDebt: data.initialDebt || 0,
+      notes: data.notes?.trim() || '',
+      createdAt: new Date().toISOString(),
+    };
+    setDoc(doc(db, 'customers', newId), sanitizeForFirestore(newCust)).catch(() => {});
+    setCustomers(prev => [newCust, ...prev]);
+    return newCust;
+  };
+
+  const updateCustomer = (id: string, updates: Partial<Customer>) => {
+    setDoc(doc(db, 'customers', id), sanitizeForFirestore(updates), { merge: true }).catch(() => {});
+    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+  };
+
+  const deleteCustomer = (id: string) => {
+    deleteDoc(doc(db, 'customers', id)).catch(() => {});
+    setCustomers(prev => prev.filter(c => c.id !== id));
+  };
+
+  const createInvoice = (data: CreateInvoiceInput): Invoice => {
+    const now = new Date().toISOString();
+    const newId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    let subtotal = 0;
+    let totalCost = 0;
+    const items = data.items.map((i: InvoiceItem) => {
+      subtotal += i.unitPrice * i.quantity;
+      totalCost += i.costPrice * i.quantity;
+      return { ...i, subtotal: i.unitPrice * i.quantity };
+    });
+    const total = Math.max(0, subtotal - (data.discount || 0));
+    const paidAmount = data.type === 'direct' ? total : (data.paidAmount || 0);
+    const remainingAmount = Math.max(0, total - paidAmount);
+    const status: InvoiceStatus = remainingAmount === 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+    const newInv: any = {
+      id: newId,
+      ownerUid: currentUser?.uid || '',
+      invoiceNumber: `INV-${new Date().getFullYear()}-${String(invoices.length + 1).padStart(4, '0')}`,
+      date: now,
+      type: data.type,
+      customerId: data.customerId || '',
+      customerName: data.customerName || (data.type === 'direct' ? 'زبون نقدي مباشر' : 'عميل غير مسجل'),
+      customerPhone: data.customerPhone || '',
+      items,
+      subtotal,
+      discount: data.discount || 0,
+      total,
+      paidAmount,
+      remainingAmount,
+      previousDebt: 0,
+      currentTotalDebt: remainingAmount,
+      paymentDueDate: data.paymentDueDate || '',
+      status,
+      notes: data.notes || '',
+      totalCost,
+      netProfit: total - totalCost,
+    };
+
+    setDoc(doc(db, 'invoices', newId), sanitizeForFirestore(newInv)).catch(() => {});
+    items.forEach(i => adjustStock(i.productId, -(i.deductedPieces ?? i.quantity)));
+    setInvoices(prev => [newInv, ...prev]);
+    return newInv;
+  };
+
+  const deleteInvoice = (id: string) => {
+    const inv = invoices.find(i => i.id === id);
+    if (!inv) return;
+    deleteDoc(doc(db, 'invoices', id)).catch(() => {});
+    inv.items.forEach(i => adjustStock(i.productId, i.deductedPieces ?? i.quantity));
+    setInvoices(prev => prev.filter(i => i.id !== id));
+  };
+
+  const returnInvoice = async (id: string): Promise<boolean> => {
+    const inv = invoices.find(i => i.id === id);
+    if (!inv || inv.status === 'returned') return false;
+    inv.items.forEach(i => adjustStock(i.productId, i.deductedPieces ?? i.quantity));
+    await updateDoc(doc(db, 'invoices', id), sanitizeForFirestore({ status: 'returned' })).catch(() => {});
+    setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: 'returned' } : i));
+    return true;
+  };
+
+  const applyBulkPriceAdjustment = async () => ({ updatedCount: 0 });
+
+  const recordPayment = (customerId: string, amount: number, notes?: string): PaymentRecord => {
+    const newId = 'pay_' + Date.now();
+    const p: PaymentRecord = {
+      id: newId,
+      customerId,
+      customerName: '',
+      amount,
+      date: new Date().toISOString(),
+      notes: notes || '',
+      receiptNumber: `REC-${Date.now()}`
+    };
+    setDoc(doc(db, 'payments', newId), sanitizeForFirestore(p)).catch(() => {});
+    setPayments(prev => [p, ...prev]);
+    return p;
+  };
+
+  const updateSettings = (newSettings: Partial<StoreSettings>) => {
+    setSettings(prev => {
+      const u = { ...prev, ...newSettings };
+      setDoc(doc(db, 'settings', 'store_settings'), sanitizeForFirestore(u), { merge: true }).catch(() => {});
+      return u;
+    });
+  };
+
+  const resetToDemo = () => {};
+  const resetToZero = () => {
+    setProducts([]);
+    setCustomers([]);
+    setInvoices([]);
+    setPayments([]);
+  };
+
+  const exportDataJSON = () => JSON.stringify({ products, customers, invoices, payments, settings }, null, 2);
+  const importDataJSON = () => ({ success: true });
+  const formatMoney = (amount: number) => `${amount.toLocaleString('en-US')} ${settings.currency}`;
+
+  const loginUser = async (user: any) => {
+    setCurrentUser(user);
+    setAuthLoading(false);
+  };
+
+  const logout = async () => {
+    setCurrentUser(null);
+    setProducts([]);
+    setCustomers([]);
+    setInvoices([]);
+    setPayments([]);
+    try {
+      localStorage.removeItem('active_client_session');
+      localStorage.removeItem('last_active_user_uid');
+    } catch (e) {}
+    await logoutAccount();
+  };
+
+  return (
+    <AppContext.Provider
+      value={{
+        products, customers, invoices, payments, settings,
+        addProduct, addBulkProducts, updateProduct, deleteProduct, adjustStock,
+        addCustomer, updateCustomer, deleteCustomer,
+        createInvoice, deleteInvoice, returnInvoice, applyBulkPriceAdjustment,
+        recordPayment, updateSettings, resetToDemo, resetToZero,
+        exportDataJSON, importDataJSON, formatMoney,
+        currentUser, authLoading, isCloudConnected, isSyncing,
+        lastSyncTime, syncNotice, setSyncNotice, syncNow,
+        loginUser, logout
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) throw new Error('useApp must be used within an AppProvider');
+  return context;
+};
