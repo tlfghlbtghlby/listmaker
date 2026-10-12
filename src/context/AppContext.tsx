@@ -59,9 +59,11 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const defaultAdminSettings: StoreSettings = {
-  storeName: 'لوحة الإدارة المركزية',
-  ownerName: 'المدير العام',
+const MUNTAZAR_UID = "0A6uEqBONPdjOjAEFO0pgfyTs082";
+
+const defaultEmptySettings: StoreSettings = {
+  storeName: 'نظام المبيعات والمخزن',
+  ownerName: '',
   phone: '',
   address: '',
   currency: 'دينار',
@@ -91,7 +93,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(defaultAdminSettings);
+  const [settings, setSettings] = useState<StoreSettings>(defaultEmptySettings);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isCloudConnected, setIsCloudConnected] = useState(true);
@@ -113,44 +115,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCustomers([]);
       setInvoices([]);
       setPayments([]);
+      setSettings(defaultEmptySettings);
       return;
     }
 
     const currentUid = currentUser.uid;
     const isAdmin = currentUser.role === 'admin';
 
+    // إذا كان حساب مدير عام: تبقى الشاشة نظيفة ومخصصة للوحة التحكم المركزية
     if (isAdmin) {
       setProducts([]);
       setCustomers([]);
       setInvoices([]);
       setPayments([]);
       setSettings({
-        ...defaultAdminSettings,
+        ...defaultEmptySettings,
         storeName: currentUser.storeName || 'لوحة الإدارة المركزية',
         ownerName: currentUser.displayName || 'المدير العام',
       });
       return;
     }
 
+    // فلترة المواد بدقة: مواد منتظر السابقة تظهر له فقط، وأي مواد جديدة تظهر لمالكها فقط
     const unsubItems = onSnapshot(collection(db, 'items'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(i => !i.ownerUid || i.ownerUid === currentUid);
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(item => {
+          if (!item.ownerUid) return currentUid === MUNTAZAR_UID;
+          return item.ownerUid === currentUid;
+        });
       setProducts(list);
       setIsCloudConnected(true);
       setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
     }, () => setIsCloudConnected(false));
 
+    // فلترة الفواتير
     const unsubInv = onSnapshot(collection(db, 'invoices'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(i => !i.ownerUid || i.ownerUid === currentUid);
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(inv => {
+          if (!inv.ownerUid) return currentUid === MUNTAZAR_UID;
+          return inv.ownerUid === currentUid;
+        });
       setInvoices(list);
     }, () => {});
 
+    // فلترة الزبائن والديون
     const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(c => !c.ownerUid || c.ownerUid === currentUid);
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(cust => {
+          if (!cust.ownerUid) return currentUid === MUNTAZAR_UID;
+          return cust.ownerUid === currentUid;
+        });
       setCustomers(list);
     }, () => {});
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'store_settings'), (snap) => {
-      if (snap.exists()) setSettings(prev => ({ ...prev, ...(snap.data() as StoreSettings) }));
+    // جلب إعدادات المتجر المناسبة للمستخدم
+    const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
+    const unsubSettings = onSnapshot(doc(db, 'settings', settingsDocId), (snap) => {
+      if (snap.exists()) {
+        setSettings(prev => ({ ...prev, ...(snap.data() as StoreSettings) }));
+      } else {
+        setSettings({
+          ...defaultEmptySettings,
+          storeName: currentUser.storeName || 'نظام المبيعات والمخزن',
+          ownerName: currentUser.displayName || '',
+        });
+      }
     }, () => {});
 
     return () => {
@@ -228,7 +260,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const addCustomer = (data: Omit<Customer, 'id' | 'createdAt' | 'totalDebt'> & { initialDebt?: number }): Customer => {
+  const addCustomer = (data: Omit<Customer, 'id' | 'createdAt' | 'totalDebt'> & { initialDebt?: number }) => {
     const newId = 'cust_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const newCust: any = {
       id: newId,
@@ -255,7 +287,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomers(prev => prev.filter(c => c.id !== id));
   };
 
-  const createInvoice = (data: CreateInvoiceInput): Invoice => {
+  const createInvoice = (data: CreateInvoiceInput) => {
     const now = new Date().toISOString();
     const newId = 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     let subtotal = 0;
@@ -338,7 +370,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateSettings = (newSettings: Partial<StoreSettings>) => {
     setSettings(prev => {
       const u = { ...prev, ...newSettings };
-      setDoc(doc(db, 'settings', 'store_settings'), sanitizeForFirestore(u), { merge: true }).catch(() => {});
+      const currentUid = currentUser?.uid;
+      const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
+      setDoc(doc(db, 'settings', settingsDocId), sanitizeForFirestore(u), { merge: true }).catch(() => {});
       return u;
     });
   };
