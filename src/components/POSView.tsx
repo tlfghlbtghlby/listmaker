@@ -240,30 +240,30 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setTimeout(() => setScanNotice(null), 4000);
   };
 
-  // Add product to cart with chosen price type - Increment quantity atomically if already in list
+  // Add product to cart with chosen price type - Place newly added or updated items at the TOP of the cart
   const addToCartWithPrice = (product: Product, priceType: PriceType, delta = 1) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.productId === product.id);
       const piecePrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
 
       if (existingIndex > -1) {
-        // مادة موجودة بالقائمة: يزداد عددها فقط دون تكرار
-        return prev.map((item, idx) => {
-          if (idx === existingIndex) {
-            const newQty = item.quantity + delta;
-            const cartonCap = item.piecesPerCarton || product.piecesPerCarton || 1;
-            const deductedPieces = item.unitType === 'carton' ? newQty * cartonCap : newQty;
-            return {
-              ...item,
-              quantity: newQty,
-              deductedPieces,
-              total: newQty * item.unitPrice,
-            };
-          }
-          return item;
-        });
+        // مادة موجودة بالقائمة: يزداد عددها وتصعد إلى أعلى وبداية القائمة فوراً
+        const target = prev[existingIndex];
+        const newQty = target.quantity + delta;
+        const cartonCap = target.piecesPerCarton || product.piecesPerCarton || 1;
+        const deductedPieces = target.unitType === 'carton' ? newQty * cartonCap : newQty;
+        const updatedItem: InvoiceItem = {
+          ...target,
+          quantity: newQty,
+          deductedPieces,
+          total: newQty * target.unitPrice,
+        };
+
+        // نضعها في البداية مع الاحتفاظ بباقي المواد
+        const otherItems = prev.filter((_, idx) => idx !== existingIndex);
+        return [updatedItem, ...otherItems];
       } else {
-        // مادة جديدة: تضاف إلى القائمة (الوحدة الافتراضية: قطعة)
+        // مادة جديدة: تضاف في بداية وأعلى القائمة (الطرف العلوي) بدلاً من الأسفل
         const cartonCap = product.piecesPerCarton || 1;
         const newItem: InvoiceItem = {
           productId: product.id,
@@ -279,7 +279,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           quantity: delta,
           total: delta * piecePrice,
         };
-        return [...prev, newItem];
+        return [newItem, ...prev];
       }
     });
   };

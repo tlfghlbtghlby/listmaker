@@ -30,6 +30,7 @@ interface AppContextType {
 
   // Product actions
   addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Product;
+  addBulkProducts: (items: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[], onProgress?: (curr: number, total: number) => void) => Promise<{ success: boolean; count: number; products: Product[] }>;
   updateProduct: (id: string, updates: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
   adjustStock: (id: string, delta: number) => void;
@@ -246,13 +247,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: now,
     };
 
-    // Direct write to Firestore collection 'items'
-    setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct)).catch(err => {
+    // Direct write to Firestore collection 'items' (Atomic persistent offline/online sync)
+    setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct), { merge: true }).catch(err => {
       console.error("Firestore add product error:", err);
     });
 
     setProducts(prev => [newProduct, ...prev]);
     return newProduct;
+  };
+
+  const addBulkProducts = async (
+    itemsData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[],
+    onProgress?: (curr: number, total: number) => void
+  ): Promise<{ success: boolean; count: number; products: Product[] }> => {
+    const now = new Date().toISOString();
+    const createdList: Product[] = [];
+    const total = itemsData.length;
+
+    for (let i = 0; i < itemsData.length; i++) {
+      const item = itemsData[i];
+      const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + i;
+      const fullProd: Product = {
+        ...item,
+        id: newId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      createdList.push(fullProd);
+
+      try {
+        await setDoc(doc(db, 'items', newId), sanitizeForFirestore(fullProd), { merge: true });
+      } catch (err) {
+        console.error("Firestore bulk add item error:", err);
+      }
+
+      if (onProgress) {
+        onProgress(i + 1, total);
+      }
+    }
+
+    setProducts(prev => [...createdList, ...prev]);
+    return { success: true, count: createdList.length, products: createdList };
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
@@ -682,6 +717,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         payments,
         settings,
         addProduct,
+        addBulkProducts,
         updateProduct,
         deleteProduct,
         adjustStock,

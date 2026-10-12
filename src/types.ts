@@ -34,6 +34,7 @@ export interface Customer {
 export interface InvoiceItem {
   productId: string;
   productName: string;
+  name?: string; // اسم المادة (اختياري للتوافق)
   code: string;
   unit: string;
   priceType: PriceType; // سعر البيع المطبق

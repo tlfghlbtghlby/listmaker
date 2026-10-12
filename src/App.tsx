@@ -36,6 +36,9 @@ const MainContent: React.FC = () => {
   // Invoice print modal
   const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
 
+  // Settings initial tab
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'all'>('store');
+
   const handleOpenNewProduct = (initialBarcode?: string) => {
     setProductToEdit(null);
     setInitialBarcodeForNewProduct(initialBarcode);
@@ -198,6 +201,10 @@ const MainContent: React.FC = () => {
           <InventoryView
             onOpenNewProduct={handleOpenNewProduct}
             onEditProduct={handleOpenEditProduct}
+            onOpenQuickAdd={() => {
+              setSettingsInitialTab('quick-add');
+              setActiveTab('settings');
+            }}
           />
         )}
 
@@ -218,7 +225,7 @@ const MainContent: React.FC = () => {
         )}
 
         {activeTab === 'settings' && (
-          <SettingsView />
+          <SettingsView initialTab={settingsInitialTab} />
         )}
       </main>
 

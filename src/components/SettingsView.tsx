@@ -24,8 +24,10 @@ import {
   TrendingDown,
   Percent,
   Sliders,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
+import { QuickAddItemsSection } from './QuickAddItemsSection';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
 const AdminPanel = React.lazy(() => import('./AdminPanel'));
@@ -40,7 +42,11 @@ const COMMON_CURRENCIES = [
   { code: 'د.أ', name: 'دينار أردني (JOD)' },
 ];
 
-export const SettingsView: React.FC = () => {
+interface SettingsViewProps {
+  initialTab?: 'store' | 'quick-add' | 'pricing' | 'security' | 'all';
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store' }) => {
   const { 
     settings, 
     updateSettings, 
@@ -79,6 +85,9 @@ export const SettingsView: React.FC = () => {
   const [roundToHundreds, setRoundToHundreds] = useState(true);
   const [isApplyingBulkPrices, setIsApplyingBulkPrices] = useState(false);
   const [bulkPriceSuccess, setBulkPriceSuccess] = useState<string | null>(null);
+
+  // تبويب الإعدادات النشط
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'all'>(initialTab);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -299,7 +308,78 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
+      {/* Settings Navigation Tabs */}
+      <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/80 rounded-2xl overflow-x-auto border border-slate-300/60 shadow-2xs">
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('store')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'store'
+              ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <Store className="w-4 h-4 text-slate-700" />
+          <span>بيانات المحل والقوائم</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('quick-add')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'quick-add'
+              ? 'bg-amber-500 text-white shadow-xs'
+              : 'text-amber-800 bg-amber-100/70 hover:bg-amber-200/80 border border-amber-300/70'
+          }`}
+        >
+          <Zap className="w-4 h-4 text-amber-500" />
+          <span>إضافة مواد سريعة</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 font-extrabold">
+            جديد
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('pricing')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'pricing'
+              ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4 text-emerald-600" />
+          <span>تصعيد وتخفيض الأسعار</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('security')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeSettingsTab === 'security'
+              ? 'bg-white text-slate-900 shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <KeyRound className="w-4 h-4 text-slate-700" />
+          <span>الأمان والنسخ الاحتياطي</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSettingsTab('all')}
+          className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap cursor-pointer mr-auto ${
+            activeSettingsTab === 'all'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'
+          }`}
+        >
+          <span>عرض الكل</span>
+        </button>
+      </div>
+
       {/* Store Settings Form */}
+      {(activeSettingsTab === 'store' || activeSettingsTab === 'all') && (
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -666,8 +746,15 @@ export const SettingsView: React.FC = () => {
         </form>
 
       </div>
+      )}
+
+      {/* Quick Add Items Section (إضافة مواد سريعة) */}
+      {(activeSettingsTab === 'quick-add' || activeSettingsTab === 'all') && (
+        <QuickAddItemsSection />
+      )}
 
       {/* ميزة تصعيد وتعديل أسعار المواد (Bulk Price Adjustment) */}
+      {(activeSettingsTab === 'pricing' || activeSettingsTab === 'all') && (
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -875,9 +962,13 @@ export const SettingsView: React.FC = () => {
 
         </div>
       </div>
+      )}
 
-      {/* Password Change Section (تغيير كلمة المرور) */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
+      {/* Password Change & Backup Sections */}
+      {(activeSettingsTab === 'security' || activeSettingsTab === 'all') && (
+        <>
+          {/* Password Change Section (تغيير كلمة المرور) */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center shadow-2xs">
@@ -1083,6 +1174,8 @@ export const SettingsView: React.FC = () => {
 
         </div>
       </div>
+        </>
+      )}
 
     </div>
   );

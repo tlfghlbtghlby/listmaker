@@ -1,21 +1,42 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  CACHE_SIZE_UNLIMITED,
+  getFirestore
+} from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { UserProfile, ADMIN_EMAIL } from './types';
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyBcddkA-S_Z9R3ss-KZ0hFTPuTXUnscOZQ",
   authDomain: "list-manger3.firebaseapp.com",
   projectId: "list-manger3",
   storageBucket: "list-manger3.firebasestorage.app",
   messagingSenderId: "1000193986227",
   appId: "1:1000193986227:web:873addec0a02b76426aac6",
-  measurementId: "G-8W891F3NP8"
+  measurementId: "G-BW891F3NPB"
 };
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// تفعيل المحرك المحلي الدائم لحفظ البيانات على الجهاز والمزامنة التلقائية عند عودة الإنترنت
+let firestoreDb: any;
+try {
+  firestoreDb = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+      cacheSizeBytes: CACHE_SIZE_UNLIMITED
+    })
+  });
+} catch (e) {
+  // If already initialized (e.g. during fast reloads)
+  firestoreDb = getFirestore(app);
+}
+
+export const db = firestoreDb;
 export const isFirebaseConfigured = true;
 
 // Authentication helpers

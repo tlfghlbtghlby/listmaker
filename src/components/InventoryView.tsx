@@ -15,7 +15,8 @@ import {
   Download,
   Filter,
   Box,
-  Scan
+  Scan,
+  Zap
 } from 'lucide-react';
 import { getCartonBreakdown } from '../utils/cartonUtils';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -23,11 +24,13 @@ import { BarcodeScannerModal } from './BarcodeScannerModal';
 interface InventoryViewProps {
   onOpenNewProduct: () => void;
   onEditProduct: (product: Product) => void;
+  onOpenQuickAdd?: () => void;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
   onOpenNewProduct,
   onEditProduct,
+  onOpenQuickAdd,
 }) => {
   const { products, deleteProduct, adjustStock, formatMoney, settings } = useApp();
 
@@ -207,11 +210,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             <button
               onClick={onOpenNewProduct}
-              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs flex items-center gap-1.5 transition"
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs flex items-center gap-1.5 transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>إدخال مادة جديدة</span>
             </button>
+
+            {onOpenQuickAdd && (
+              <button
+                onClick={onOpenQuickAdd}
+                className="px-3.5 py-2 text-xs font-bold text-amber-800 bg-amber-100/90 hover:bg-amber-200 border border-amber-300/80 rounded-lg shadow-2xs flex items-center gap-1.5 transition cursor-pointer"
+                title="إضافة مواد سريعة متعددة بأسطر وفواصل"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-600" />
+                <span>إضافة مواد سريعة</span>
+              </button>
+            )}
           </div>
 
         </div>

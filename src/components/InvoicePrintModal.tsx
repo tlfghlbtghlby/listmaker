@@ -11,7 +11,8 @@ import {
   FileDown,
   Bluetooth,
   RefreshCw,
-  Info
+  Info,
+  ArrowDownAZ
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -36,6 +37,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const [printLayout, setPrintLayout] = useState<'a4' | 'a5' | 'thermal'>(
     settings.printFormat === 'thermal' ? 'thermal' : 'a4'
   );
+  const [sortByAlphabet, setSortByAlphabet] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<string | null>(null);
@@ -85,6 +87,15 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const paid = invoice.paidAmount;
   const totalRemainingDebt = Math.max(0, grandTotal - paid);
   const currencyLabel = settings.currency || 'دينار';
+
+  // فرز المواد المعروضة في القائمة المطبوعة فقط أبجدياً بحسب اسم المادة عند تفعيل الخيار
+  const displayedItems = sortByAlphabet
+    ? [...invoice.items].sort((a, b) => {
+        const nameA = a.name || a.productName || '';
+        const nameB = b.name || b.productName || '';
+        return nameA.localeCompare(nameB, 'ar');
+      })
+    : invoice.items;
 
   // Native Print with absolute top scroll reset
   const handlePrint = () => {
@@ -320,48 +331,76 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         {/* Top Controls Bar (Hidden in Print) */}
         <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2.5 no-print">
           
-          {/* Format Selector Tabs */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs font-bold text-slate-700">تنسيق الطباعة:</span>
-            <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setPrintLayout('a4')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
-                  printLayout === 'a4'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>ورقة كاملة (A4)</span>
-              </button>
+          {/* Format Selector Tabs & Print Options */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-700">تنسيق الطباعة:</span>
+              <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setPrintLayout('a4')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    printLayout === 'a4'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>ورقة كاملة (A4)</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setPrintLayout('a5')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
-                  printLayout === 'a5'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>نصف ورقة (A5)</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintLayout('a5')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    printLayout === 'a5'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>نصف ورقة (A5)</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setPrintLayout('thermal')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
-                  printLayout === 'thermal'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                <button
+                  type="button"
+                  onClick={() => setPrintLayout('thermal')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition cursor-pointer ${
+                    printLayout === 'thermal'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>وصل كاشير (80mm)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* خيار تحكم اختياري: ترتيب المواد أبجدياً (أ - ي) */}
+            <div className="flex items-center gap-1.5 border-r border-slate-300 pr-2.5 sm:mr-1">
+              <label 
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition select-none shadow-2xs ${
+                  sortByAlphabet
+                    ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-1 ring-emerald-500/30'
+                    : 'bg-white border-slate-300 hover:border-slate-400 text-slate-700'
                 }`}
+                title="إعادة فرز وترتيب المواد في القائمة المطبوعة فقط بحسب الحروف الأبجدية من أ إلى ي"
               >
-                <Receipt className="w-3.5 h-3.5" />
-                <span>وصل كاشير (80mm)</span>
-              </button>
+                <input
+                  type="checkbox"
+                  checked={sortByAlphabet}
+                  onChange={(e) => setSortByAlphabet(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+                />
+                <ArrowDownAZ className={`w-4 h-4 ${sortByAlphabet ? 'text-emerald-600' : 'text-slate-500'}`} />
+                <span>ترتيب المواد أبجدياً (أ - ي)</span>
+                {sortByAlphabet && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-900 font-extrabold mr-0.5">
+                    مفعل
+                  </span>
+                )}
+              </label>
             </div>
           </div>
 
@@ -572,7 +611,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       </tr>
                     </thead>
                     <tbody>
-                      {invoice.items.map((item, index) => {
+                      {displayedItems.map((item, index) => {
                         const isPiece = item.unitType === 'piece' || item.unit?.includes('قطعة');
                         const qtyFormatted = Number(item.quantity).toLocaleString();
 
@@ -773,7 +812,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
                 {/* Items */}
                 <div className="border-b border-dashed border-black pb-2 space-y-1">
-                  {invoice.items.map((item, idx) => (
+                  {displayedItems.map((item, idx) => (
                     <div key={idx} className="flex flex-col">
                       <div className="font-bold">{item.productName}</div>
                       <div className="flex justify-between text-[10px] text-slate-700">
