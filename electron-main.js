@@ -15,27 +15,26 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'electron-preload.js'),
+      preload: path.join(__dirname, 'electron-preload.cjs'),
     },
   });
 
   win.loadFile(path.join(__dirname, 'dist/index.html'));
 }
 
-// معالج أمر الطباعة التلقائية الصامتة بدون نافذة حوار ويندوز
+// معالج الطباعة التلقائية الصامتة
 ipcMain.handle('print-silent', async (event, format = 'thermal') => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return false;
 
   let printOptions = {
-    silent: true,            // طباعة صامتة وتلقائية بدون إظهار نافذة الحوار
+    silent: true,            // طباعة فورية بدون نافذة حوار ويندوز
     printBackground: true,   // طباعة التصاميم والألوان
     margins: { marginType: 'none' }
   };
 
-  // تحديد مقاس الورقة بدقة بحسب خيار المستخدم في الإعدادات
   if (format === 'thermal' || format === 'roll80' || format === 'receipt') {
-    printOptions.pageSize = { width: 80000, height: 297000 }; // ورق كاشير حراري 80mm
+    printOptions.pageSize = { width: 80000, height: 297000 }; // ورق كاشير 80mm
   } else if (format === 'a5') {
     printOptions.pageSize = 'A5';
   } else {
@@ -44,9 +43,7 @@ ipcMain.handle('print-silent', async (event, format = 'thermal') => {
 
   return new Promise((resolve) => {
     win.webContents.print(printOptions, (success, failureReason) => {
-      if (!success) {
-        console.warn('تنبيه فشل الطباعة الصامتة:', failureReason);
-      }
+      if (!success) console.warn('فشل أمر الطباعة الصامتة:', failureReason);
       resolve(success);
     });
   });
