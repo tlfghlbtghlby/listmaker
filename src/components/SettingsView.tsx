@@ -25,7 +25,8 @@ import {
   Percent,
   Sliders,
   Sparkles,
-  Zap
+  Zap,
+  Printer
 } from 'lucide-react';
 import { QuickAddItemsSection } from './QuickAddItemsSection';
 
@@ -52,7 +53,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     updateSettings, 
     exportDataJSON, 
     importDataJSON, 
-    resetToZero,
     currentUser,
     logout,
     products,
@@ -65,7 +65,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   const [address, setAddress] = useState(settings.address);
   const [currency, setCurrency] = useState(settings.currency);
   const [invoiceFooterNote, setInvoiceFooterNote] = useState(settings.invoiceFooterNote);
-  const [printFormat, setPrintFormat] = useState<'a4' | 'thermal'>(settings.printFormat);
+  
+  // خيارات الطباعة وأحجام الورق بما فيها 58mm والطباعة الصامتة
+  const [printFormat, setPrintFormat] = useState<'a4' | 'a5' | 'thermal' | 'thermal80' | 'thermal58'>(
+    settings.printFormat || 'a4'
+  );
+  const [directPrintEnabled, setDirectPrintEnabled] = useState<boolean>(
+    settings.directPrintEnabled ?? false
+  );
+
   const [enableWholesale, setEnableWholesale] = useState<boolean>(settings.enableWholesale ?? true);
   const [desktopLayout, setDesktopLayout] = useState<'full' | 'partial'>(settings.desktopLayout || 'full');
 
@@ -117,6 +125,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       currency: currency.trim() || 'د.ع',
       invoiceFooterNote: invoiceFooterNote.trim(),
       printFormat,
+      directPrintEnabled,
       enableWholesale,
       desktopLayout,
       headerRightSealText: headerRightSealText.trim() || (enableWholesale ? 'جملة' : 'تجزئة'),
@@ -254,7 +263,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       
-      {/* Admin Panel: Loaded conditionally via React.lazy so clients NEVER download or bundle admin code */}
+      {/* Admin Panel */}
       {isAdmin && (
         <Suspense fallback={
           <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 text-center text-emerald-400 font-bold flex items-center justify-center gap-2 shadow-lg">
@@ -388,8 +397,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
               <Store className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">بيانات المحل والقوائم</h2>
-              <p className="text-xs text-slate-400">تظهر هذه المعلومات في ترويسة وتذييل الفواتير المطبوعة</p>
+              <h2 className="text-base font-bold text-slate-900">بيانات المحل والقوائم والطباعة</h2>
+              <p className="text-xs text-slate-400">تظهر هذه المعلومات في ترويسة وتذييل الفواتير وإعدادات الطابعات</p>
             </div>
           </div>
 
@@ -401,7 +410,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
           )}
         </div>
 
-        <form onSubmit={handleSaveSettings} className="p-6 space-y-4">
+        <form onSubmit={handleSaveSettings} className="p-6 space-y-5">
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -485,34 +494,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                نمط الطباعة الافتراضي للقوائم
+                نمط ومقاس الورق الافتراضي للطابعة
               </label>
               <select
                 value={printFormat}
-                onChange={(e) => setPrintFormat(e.target.value as 'a4' | 'thermal')}
+                onChange={(e) => setPrintFormat(e.target.value as any)}
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
               >
+                <option value="thermal58">وصل كاشير حراري صغير (58mm)</option>
+                <option value="thermal80">وصل كاشير حراري قياسي (80mm)</option>
+                <option value="a5">نصف ورقة عادية (A5)</option>
                 <option value="a4">فاتورة قياس A4 رسمية كاملة</option>
-                <option value="thermal">وصل كاشير حراري قياس 80mm</option>
               </select>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                اختيار (58mm) يقوم بضبط هوامش الفاتورة لتلائم طابعات الإيصالات الصغيرة وتفادي اقتطاع الأسعار.
+              </span>
+            </div>
+          </div>
+
+          {/* POS Printing Configuration (Fast Direct Print) */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <Printer className="w-4 h-4" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-800 block">
+                    الطباعة الفورية الصامتة للكاشير (Direct POS Printing)
+                  </label>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    إرسال أمر الطباعة مباشرة للطابعة الافتراضية وتجاوز نافذة الحوار عند حفظ الفاتورة
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={directPrintEnabled}
+                  onChange={(e) => setDirectPrintEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
             </div>
           </div>
 
           {/* Wholesale Mode Toggle */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-            <div className="flex items-start justify-between">
-              <div>
-                <label className="text-xs font-bold text-slate-800 block">
-                  نظام البيع بالجملة وأسعار الجملة
-                </label>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  حدد ما إذا كان المحل يبيع بالجملة والمفرد، أو يبيع بالمفرد فقط لإخفاء خيارات الجملة
-                </p>
-              </div>
+            <div>
+              <label className="text-xs font-bold text-slate-800 block">
+                نظام البيع بالجملة وأسعار الجملة
+              </label>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                حدد ما إذا كان المحل يبيع بالجملة والمفرد، أو يبيع بالمفرد فقط لإخفاء خيارات الجملة
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              {/* Option 1: Enabled (Wholesale + Retail) */}
               <div
                 onClick={() => setEnableWholesale(true)}
                 className={`p-3 rounded-lg border cursor-pointer transition select-none flex items-start gap-2.5 ${
@@ -538,7 +578,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                 </div>
               </div>
 
-              {/* Option 2: Disabled (Retail Only) */}
               <div
                 onClick={() => setEnableWholesale(false)}
                 className={`p-3 rounded-lg border cursor-pointer transition select-none flex items-start gap-2.5 ${
@@ -566,7 +605,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* Desktop Layout Mode: Full Computer Mode vs Partial Computer Mode */}
+          {/* Desktop Layout Mode */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
             <div>
               <label className="text-xs font-bold text-slate-800 block">
@@ -578,7 +617,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              {/* Option 1: Full Computer Mode (الأساسي والافتراضي) */}
               <div
                 onClick={() => setDesktopLayout('full')}
                 className={`p-3 rounded-lg border cursor-pointer transition select-none flex items-start gap-2.5 ${
@@ -607,7 +645,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                 </div>
               </div>
 
-              {/* Option 2: Partial Computer Mode (الوضع السابق بالتبويبات) */}
               <div
                 onClick={() => setDesktopLayout('partial')}
                 className={`p-3 rounded-lg border cursor-pointer transition select-none flex items-start gap-2.5 ${
@@ -635,7 +672,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* تخصيص مظهر ونصوص ترويسة القائمة وختمها */}
+          {/* Custom Header Seals & Labels */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-emerald-600" />
@@ -644,13 +681,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   تخصيص عبارات ومظهر القائمة المطبوعة (الختم، التجارة، الإدارة)
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  تحكم بجميع الكلمات والنصوص التي تظهر في أعلى القائمة (مثلاً تغيير تجزئة إلى جملة، أو مفرد إلى قطع)
+                  تحكم بجميع الكلمات والنصوص التي تظهر في أعلى القائمة (تجزئة، جملة، مفرد، قطع)
                 </p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-              {/* ختم اليمين (مثال: جملة / تجزئة) */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   نص الختم الأيمن (الافتراضي: جملة أو تجزئة)
@@ -662,12 +698,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   placeholder="جملة"
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  يمكن كتابة: تجزئة، جملة، مورد، معتمد، أو أي كلمة تريدها داخل النجمة اليمنى
-                </span>
               </div>
 
-              {/* ختم اليسار (مثال: مفرد / قطع) */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   نص الختم الأيسر (الافتراضي: مفرد أو قطع)
@@ -679,14 +711,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   placeholder="مفرد"
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  يمكن كتابة: مفرد، قطع، نقداً، فوري، أو أي كلمة تريدها داخل النجمة اليسرى
-                </span>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* كلمة بإدارة أو إشراف */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   بادئة اسم المدير / الإشراف
@@ -698,12 +726,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   placeholder="بإدارة"
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  مثال: بإدارة، بإشراف، المدير العام، مسؤول المبيعات
-                </span>
               </div>
 
-              {/* نوع التجارة أو النشاط */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   نوع التجارة والنشاط (يظهر بجانب اسم الإدارة)
@@ -715,9 +739,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   placeholder="تجارة عامة وبيع الجملة والمفرد"
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
-                <span className="text-[10px] text-slate-400 mt-1 block">
-                  اكتب نشاط محلك: لتجارة المواد الإنشائية والكهربائية، أدوات منزلية، تجهيزات غذائية، إلخ.
-                </span>
               </div>
             </div>
           </div>
@@ -737,9 +758,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
+              className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition cursor-pointer"
             >
-              حفظ إعدادات المحل والقوائم
+              حفظ إعدادات المحل والقوائم والطباعة
             </button>
           </div>
 
@@ -748,12 +769,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       </div>
       )}
 
-      {/* Quick Add Items Section (إضافة مواد سريعة) */}
+      {/* Quick Add Items Section */}
       {(activeSettingsTab === 'quick-add' || activeSettingsTab === 'all') && (
         <QuickAddItemsSection />
       )}
 
-      {/* ميزة تصعيد وتعديل أسعار المواد (Bulk Price Adjustment) */}
+      {/* Bulk Price Adjustment */}
       {(activeSettingsTab === 'pricing' || activeSettingsTab === 'all') && (
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
@@ -766,7 +787,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                 تصعيد أو تخفيض أسعار المواد في المخزن
               </h2>
               <p className="text-xs text-slate-400">
-                رفع أو خفض الأسعار بنسبة مئوية (مثلاً 15% أو 20% أو أي نسبة يحددها صاحب المحل) عند تغير السوق
+                رفع أو خفض الأسعار بنسبة مئوية عند تغير سعر السوق
               </p>
             </div>
           </div>
@@ -783,7 +804,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           )}
 
-          {/* الاتجاه: رفع/تصعيد أم خفض */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
               نوع العملية المطلوبة:
@@ -817,7 +837,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* اختيار النسبة المئوية */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
               النسبة المئوية المراد تطبيقها:
@@ -864,7 +883,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* تحديد الأسعار المستهدفة بالتعديل */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
             <label className="block text-xs font-bold text-slate-800 mb-2">
               الأسعار التي سيتم تعديلها:
@@ -906,7 +924,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
               </label>
             </div>
 
-            {/* خيار التقريب التجاري الأنيق */}
             <div className="mt-3 pt-3 border-t border-slate-200/80 flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -922,7 +939,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* زر تطبيق تصعيد / تخفيض الأسعار */}
           <div className="flex items-center justify-between pt-2">
             <div className="text-xs text-slate-500">
               {priceDirection === 'increase' ? 'الزيادة المقررة:' : 'الخصم المقرر:'}
@@ -964,219 +980,212 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       </div>
       )}
 
-      {/* Password Change & Backup Sections */}
+      {/* Security & Password & Backup */}
       {(activeSettingsTab === 'security' || activeSettingsTab === 'all') && (
         <>
-          {/* Password Change Section (تغيير كلمة المرور) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center shadow-2xs">
-              <KeyRound className="w-5 h-5" />
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-700 flex items-center justify-center shadow-2xs">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">تغيير كلمة المرور / رمز الحساب</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    أدخل كلمة المرور القديمة الحالية، ثم أدخل كلمة المرور الجديدة لحفظها فوراً
+                  </p>
+                </div>
+              </div>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
+                {currentUser?.displayName || currentUser?.email || 'حساب نشط'}
+              </span>
             </div>
+
+            {passwordFeedback && (
+              <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border shadow-2xs ${
+                passwordFeedback.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  : 'bg-rose-50 text-rose-800 border-rose-300'
+              }`}>
+                {passwordFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span>{passwordFeedback.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  كلمة المرور القديمة (الحالية) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldPassword ? 'text' : 'password'}
+                    required
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    placeholder="أدخل كلمة المرور القديمة..."
+                    className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50/50"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPassword(!showOldPassword)}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title={showOldPassword ? 'إخفاء' : 'إظهار'}
+                  >
+                    {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    كلمة المرور الجديدة <span className="text-emerald-600">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="6 خانات أو أكثر..."
+                      className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title={showNewPassword ? 'إخفاء' : 'إظهار'}
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    تأكيد كلمة المرور الجديدة <span className="text-emerald-600">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="أعد كتابة الجديدة..."
+                      className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title={showConfirmPassword ? 'إخفاء' : 'إظهار'}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isChangingPassword}
+                  className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer ${
+                    isChangingPassword
+                      ? 'bg-amber-700 opacity-80 cursor-wait'
+                      : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
+                >
+                  {isChangingPassword ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري الحفظ والتحقق...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>حفظ كلمة المرور الجديدة</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
             <div>
-              <h3 className="font-bold text-base text-slate-900">تغيير كلمة المرور / رمز الحساب</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                أدخل كلمة المرور القديمة الحالية، ثم أدخل كلمة المرور الجديدة لحفظها فوراً
+              <h3 className="font-bold text-base text-slate-900">النسخ الاحتياطي وإدارة البيانات</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                احفظ نسخة احتياطية من المواد والمبيعات والزبائن على جهازك للرجوع إليها بأي وقت
               </p>
             </div>
-          </div>
-          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
-            {currentUser?.displayName || currentUser?.email || 'حساب نشط'}
-          </span>
-        </div>
 
-        {passwordFeedback && (
-          <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border shadow-2xs ${
-            passwordFeedback.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-              : 'bg-rose-50 text-rose-800 border-rose-300'
-          }`}>
-            {passwordFeedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            {importStatus && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-1.5 shadow-2xs">
+                <Check className="w-4 h-4" />
+                <span>{importStatus}</span>
+              </div>
             )}
-            <span>{passwordFeedback.message}</span>
-          </div>
-        )}
 
-        <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
-          {/* Old Password */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              كلمة المرور القديمة (الحالية) <span className="text-rose-500">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showOldPassword ? 'text' : 'password'}
-                required
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="أدخل كلمة المرور القديمة..."
-                className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-50/50"
-                dir="ltr"
-              />
+            {importError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-800 flex items-center gap-1.5 shadow-2xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{importError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
-                type="button"
-                onClick={() => setShowOldPassword(!showOldPassword)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                title={showOldPassword ? 'إخفاء' : 'إظهار'}
+                onClick={handleDownloadBackup}
+                className="p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group cursor-pointer"
               >
-                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition">
+                  <Download className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-slate-900">تحميل نسخة احتياطية</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    تنزيل ملف JSON يحفظ كافة البيانات
+                  </div>
+                </div>
               </button>
-            </div>
-          </div>
 
-          {/* New Password */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                كلمة المرور الجديدة <span className="text-emerald-600">*</span>
-              </label>
-              <div className="relative">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group cursor-pointer"
+              >
                 <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  required
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="6 خانات أو أكثر..."
-                  className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
-                  dir="ltr"
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept=".json"
+                  className="hidden"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  title={showNewPassword ? 'إخفاء' : 'إظهار'}
-                >
-                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Confirm New Password */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                تأكيد كلمة المرور الجديدة <span className="text-emerald-600">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="أعد كتابة الجديدة..."
-                  className="w-full pl-10 pr-3 py-2.5 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50"
-                  dir="ltr"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  title={showConfirmPassword ? 'إخفاء' : 'إظهار'}
-                >
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-2 group-hover:bg-blue-600 group-hover:text-white transition">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-slate-900">استعادة من ملف</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    رفع ملف نسخة احتياطية سابقة
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={isChangingPassword}
-              className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer ${
-                isChangingPassword
-                  ? 'bg-amber-700 opacity-80 cursor-wait'
-                  : 'bg-amber-600 hover:bg-amber-700'
-              }`}
-            >
-              {isChangingPassword ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>جاري الحفظ والتحقق...</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>حفظ كلمة المرور الجديدة</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Backup & Data Management */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
-        <div>
-          <h3 className="font-bold text-base text-slate-900">النسخ الاحتياطي وإدارة البيانات</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            احفظ نسخة احتياطية من المواد والمبيعات والزبائن على جهازك للرجوع إليها بأي وقت
-          </p>
-        </div>
-
-        {importStatus && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-1.5 shadow-2xs">
-            <Check className="w-4 h-4" />
-            <span>{importStatus}</span>
-          </div>
-        )}
-
-        {importError && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold text-rose-800 flex items-center gap-1.5 shadow-2xs">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{importError}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          
-          {/* Export JSON */}
-          <button
-            onClick={handleDownloadBackup}
-            className="p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition">
-              <Download className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="font-bold text-sm text-slate-900">تحميل نسخة احتياطية</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                تنزيل ملف JSON يحفظ كافة البيانات
-              </div>
-            </div>
-          </button>
-
-          {/* Import JSON */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group cursor-pointer"
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              accept=".json"
-              className="hidden"
-            />
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-2 group-hover:bg-blue-600 group-hover:text-white transition">
-              <Upload className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="font-bold text-sm text-slate-900">استعادة من ملف</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                رفع ملف نسخة احتياطية سابقة
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
         </>
       )}
 
     </div>
   );
 };
+
+export default SettingsView;
