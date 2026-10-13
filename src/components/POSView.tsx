@@ -161,7 +161,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const [discount, setDiscount] = useState<number>(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [dueDate, setDueDate] = useState<string>(() => {
-    // Default due date: 15 days from now
     const d = new Date();
     d.setDate(d.getDate() + 15);
     return d.toISOString().split('T')[0];
@@ -240,14 +239,13 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setTimeout(() => setScanNotice(null), 4000);
   };
 
-  // Add product to cart with chosen price type - Place newly added or updated items at the TOP of the cart
+  // Add product to cart with chosen price type
   const addToCartWithPrice = (product: Product, priceType: PriceType, delta = 1) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.productId === product.id);
       const piecePrice = priceType === 'wholesale' ? product.wholesalePrice : product.retailPrice;
 
       if (existingIndex > -1) {
-        // مادة موجودة بالقائمة: يزداد عددها وتصعد إلى أعلى وبداية القائمة فوراً
         const target = prev[existingIndex];
         const newQty = target.quantity + delta;
         const cartonCap = target.piecesPerCarton || product.piecesPerCarton || 1;
@@ -259,11 +257,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           total: newQty * target.unitPrice,
         };
 
-        // نضعها في البداية مع الاحتفاظ بباقي المواد
         const otherItems = prev.filter((_, idx) => idx !== existingIndex);
         return [updatedItem, ...otherItems];
       } else {
-        // مادة جديدة: تضاف في بداية وأعلى القائمة (الطرف العلوي) بدلاً من الأسفل
         const cartonCap = product.piecesPerCarton || 1;
         const newItem: InvoiceItem = {
           productId: product.id,
@@ -288,18 +284,15 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     addToCartWithPrice(product, globalPriceType, delta);
   };
 
-  // Handle Barcode Scanned via Hardware Scanner Gun, Camera or Search Bar
   const handleBarcodeScanned = (scannedCode: string) => {
     const clean = scannedCode.trim();
     if (!clean) return;
 
-    // Match exact code or case-insensitive code
     const matched = products.find((p) => p.code.toLowerCase() === clean.toLowerCase())
       || products.find((p) => p.code === clean);
 
     if (matched) {
       playScannerBeep('success');
-      // يزداد عددها فقط إذا كانت موجودة بالقائمة، أو تضاف إذا كانت غير موجودة
       addToCartWithPrice(matched, globalPriceType, 1);
       setSearchQuery('');
       setUnfoundBarcodePrompt(null);
@@ -319,13 +312,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     handleBarcodeScannedRef.current = handleBarcodeScanned;
   });
 
-  // Global Hardware Barcode Reader Listener (Laser / USB / Bluetooth Scanner Guns)
   useEffect(() => {
     let buffer = '';
     let lastKeyTime = Date.now();
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if any modal is currently open
       if (showQuickAddModal || isScannerOpen || !!unfoundBarcodePrompt) return;
 
       const target = e.target as HTMLElement;
@@ -345,12 +336,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
         return;
       }
 
-      // Barcode scanners transmit characters in rapid bursts (< 80ms between keystrokes)
       if (e.key.length === 1) {
         if (diff > 120 && buffer.length > 0) {
           buffer = '';
         }
-        // If not typing in an input, or if keystrokes arrive with scanner speed (< 50ms)
         if (!isInput || diff < 50) {
           buffer += e.key;
         }
@@ -361,7 +350,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [showQuickAddModal, isScannerOpen, unfoundBarcodePrompt]);
 
-  // Update Item Quantity
   const updateQuantity = (productId: string, newQty: number) => {
     if (newQty <= 0) {
       removeFromCart(productId);
@@ -385,7 +373,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     );
   };
 
-  // Switch unit type between 'piece' (قطعة) and 'carton' (كرتون)
   const toggleItemUnitType = (productId: string, newUnitType: 'piece' | 'carton') => {
     const prod = products.find((p) => p.id === productId);
     if (!prod) return;
@@ -418,7 +405,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     );
   };
 
-  // Switch price type for an individual item in cart
   const toggleItemPriceType = (productId: string, newPriceType: PriceType) => {
     const prod = products.find((p) => p.id === productId);
     if (!prod) return;
@@ -443,7 +429,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     );
   };
 
-  // Apply global price type to all current items
   const handleGlobalPriceTypeChange = (type: PriceType) => {
     setGlobalPriceType(type);
     setCartItems((prev) =>
@@ -472,7 +457,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setNotes('');
   };
 
-  // Math totals
   const subtotal = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + item.total, 0);
   }, [cartItems]);
@@ -484,7 +468,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const finalTotal = Math.max(0, subtotal - discount);
   const estimatedProfit = finalTotal - totalCost;
 
-  // In direct sale, paid amount is full total. In credit sale, user sets downpayment
   const actualPaidAmount = saleType === 'direct' ? finalTotal : Math.min(paidAmount, finalTotal);
   const remainingDebt = Math.max(0, finalTotal - actualPaidAmount);
   const previousCustomerDebt = selectedCustomer ? selectedCustomer.totalDebt : 0;
@@ -502,11 +485,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     let finalCustomerName = customCustomerName.trim();
     let finalCustomerPhone = customerPhone.trim();
 
-    // Check Credit Sale Rule: Only pre-registered customers allowed
     if (saleType === 'credit') {
       let activeCustomer = selectedCustomer;
 
-      // If no customer is currently selected by ID, attempt matching by typed name
       if (!activeCustomer && finalCustomerName) {
         const found = customers.find(
           (c) => c.name.trim().toLowerCase() === finalCustomerName.toLowerCase()
@@ -518,7 +499,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
         }
       }
 
-      // If still not a registered customer, block credit sale and propose adding him
       if (!activeCustomer || !finalCustomerId) {
         setCartErrorNotice(
           'لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام لضمان حفظ الديون ومتابعتها! يرجى اختيار زبون مسجل أو الضغط على زر الاقتراح.'
@@ -532,7 +512,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       finalCustomerName = activeCustomer.name;
       finalCustomerPhone = activeCustomer.phone || finalCustomerPhone;
     } else {
-      // Direct Cash Sale
       if (!finalCustomerName) {
         finalCustomerName = selectedCustomer?.name || 'زبون نقدي مباشر';
       }
@@ -553,12 +532,16 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       notes: notes.trim(),
     });
 
-    // Clear cart
     clearCart();
     if (saleType === 'credit') {
       setSelectedCustomerId('');
       setCustomCustomerName('');
       setCustomerPhone('');
+    }
+
+    // إرسال أمر الطباعة الصامتة المباشرة إذا كانت مفعلة في الإعدادات وكان التطبيق يعمل داخل Electron
+    if (andPrint && settings.directPrintEnabled && (window as any).electronAPI?.printSilent) {
+      (window as any).electronAPI.printSilent(settings.printFormat || 'thermal58');
     }
 
     onInvoiceCreated(created);
@@ -568,8 +551,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
   return (
     <div className="flex flex-col gap-4">
-      
-      {/* Mobile Mode Switcher Tabs (Only visible when deviceMode is 'mobile') */}
+      {/* Mobile Mode Switcher Tabs */}
       {isMobileMode && (
         <div className="flex items-center bg-slate-200/90 p-1 rounded-xl text-xs font-bold w-full shadow-inner">
           <button
@@ -607,17 +589,14 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
         </div>
       )}
 
-      {/* Main Content Grid: Side-by-side on desktop (مستطيل وجانبي: المواد وبجانبها القائمة), tabbed on mobile */}
+      {/* Main Content Grid */}
       <div className={isMobileMode ? 'flex flex-col gap-4' : 'grid grid-cols-12 gap-4 lg:gap-6'}>
         
-        {/* Products Column (Right in RTL): Visible on Desktop OR when mobileTab === 'products' */}
+        {/* Products Column */}
         {(!isMobileMode || mobileTab === 'products') && (
           <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-7'} flex flex-col gap-4`}>
             
-            {/* Search & Categories Box */}
             <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-3">
-              
-              {/* Clean Search Input + Direct Quick Add Product Button */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
@@ -666,7 +645,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </button>
               </div>
 
-              {/* Scan Feedback Banner */}
               {scanNotice && (
                 <div className="bg-emerald-50 border border-emerald-300 text-emerald-950 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between shadow-2xs">
                   <div className="flex items-center gap-2">
@@ -683,7 +661,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               )}
 
-              {/* Category Tabs */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
                 {categories.map((cat) => (
                   <button
@@ -701,7 +678,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             </div>
 
-            {/* Products List - Full Vertical Extension: ممتد لنهاية البرنامج بالكامل دون التقيد بخانة مربعة محددة */}
             <div className="flex flex-col gap-2.5 flex-1 pb-24">
               {filteredProducts.length === 0 ? (
                 <div className="py-12 text-center bg-white rounded-xl border border-slate-200 p-6">
@@ -723,12 +699,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           : 'border-slate-200 hover:border-emerald-500 hover:shadow-xs'
                       }`}
                     >
-                      {/* Right side: Product Name, Stock (ABOVE name), Code, Unit, Category & Edit Price Button */}
                       <div
                         onClick={() => addToCart(prod)}
                         className="flex-1 min-w-0 cursor-pointer"
                       >
-                        {/* 1. المتوفر فوق الاسم مع إظهار رصيد الصفر أو السالب باللون الأحمر الواضح لتنبيه البائع */}
                         <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
                           <span
                             className={`text-xs font-black px-2.5 py-0.5 rounded-md border flex items-center gap-1 shrink-0 ${
@@ -762,7 +736,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </span>
                         </div>
 
-                        {/* 2. اسم المادة مع زر قلم صغير جانبه لتعديل السعر بدون تداخل */}
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug group-hover:text-emerald-700 transition">
                             {prod.name}
@@ -782,10 +755,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                         </div>
                       </div>
 
-                      {/* Left side: Prices shown & Actions (بدون تداخل) */}
                       <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
-                        
-                        {/* 1. Wholesale Cost Price Box - ALWAYS VISIBLE */}
                         <div className="bg-slate-100 border border-slate-300/80 rounded-lg px-2.5 py-1 text-right min-w-[95px] shrink-0">
                           <div className="text-[10px] text-slate-600 font-bold">
                             سعر تكلفة الجملة:
@@ -795,7 +765,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         </div>
 
-                        {/* 2. Wholesale Selling Price Box - VISIBLE ONLY IF WHOLESALE IS ENABLED */}
                         {settings.enableWholesale && (
                           <div className="bg-amber-50/90 border border-amber-200/90 rounded-lg px-2.5 py-1 text-right min-w-[95px] shrink-0">
                             <div className="text-[10px] text-amber-800 font-bold">
@@ -807,7 +776,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         )}
 
-                        {/* 3. Retail Selling Price Box - ALWAYS VISIBLE */}
                         <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-lg px-3 py-1.5 text-right min-w-[105px] shrink-0">
                           <div className="text-[10px] text-emerald-800 font-bold">
                             {settings.enableWholesale ? 'سعر بيع المفرد:' : 'سعر البيع:'}
@@ -817,7 +785,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         </div>
 
-                        {/* Direct Quick Add Action Buttons - متاح للبيع دائماً حتى لو كان الرصيد صفراً مع تنبيه واضح باللون الأحمر */}
                         <div className="flex items-center gap-1.5 shrink-0">
                           {settings.enableWholesale ? (
                             <>
@@ -882,7 +849,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               )}
             </div>
 
-            {/* Mobile Mode Floating Bottom Cart Bar */}
             {isMobileMode && cartItems.length > 0 && mobileTab === 'products' && (
               <div className="fixed bottom-3 left-3 right-3 z-30 bg-slate-900/95 backdrop-blur-md text-white p-3 rounded-2xl shadow-2xl flex items-center justify-between border border-slate-700">
                 <div className="flex items-center gap-2.5">
@@ -908,11 +874,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           </div>
         )}
 
-        {/* Left Column (in RTL): Invoice Builder & Cart: Visible on Desktop OR when mobileTab === 'cart' */}
+        {/* Invoice Builder & Cart Column */}
         {(!isMobileMode || mobileTab === 'cart') && (
           <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-5 md:sticky md:top-4'} flex flex-col gap-4`}>
             
-            {/* Mobile Back Button to return to products catalog */}
             {isMobileMode && (
               <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200">
                 <button
@@ -931,10 +896,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
           
-          {/* Header Controls: Direct / Credit Sale & Price mode */}
           <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex flex-col gap-3">
-            
-            {/* Sale Type Selector (بيع مباشر vs بيع آجل) */}
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">نوع القائمة:</span>
               <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
@@ -963,7 +925,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             </div>
 
-            {/* Price Type Switcher (تجزئة vs جملة) - يظهر فقط إذا كان البيع بالجملة مفعل في الإعدادات */}
             {settings.enableWholesale && (
               <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
                 <span className="text-xs font-bold text-slate-700">سعر البيع المطبق:</span>
@@ -994,7 +955,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
           </div>
 
-          {/* Cart Items Table */}
           <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[520px] lg:max-h-[calc(100vh-320px)]">
             {cartItems.length === 0 ? (
               <div className="h-44 flex flex-col items-center justify-center text-slate-400 text-center">
@@ -1020,7 +980,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           : 'bg-slate-50 border-slate-200/90'
                       }`}
                     >
-                      {/* Line 1: Item Name, Unit Selector (قطعة أم كرتون), Price selector, Remove */}
                       <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1052,10 +1011,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           </div>
                         </div>
 
-                        {/* Controls: Unit selector (قطعة / كرتون) + Price Type selector + Remove */}
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          
-                          {/* زر صغير لاختيار إذا كانت الوحدة قطعة أم كرتون */}
                           <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-md border border-slate-300 text-[10px] font-bold">
                             <button
                               type="button"
@@ -1084,7 +1040,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                             </button>
                           </div>
 
-                          {/* Price Type button - only shown if wholesale mode is enabled */}
                           {settings.enableWholesale && (
                             <button
                               type="button"
@@ -1105,7 +1060,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                             </button>
                           )}
 
-                          {/* Delete Item */}
                           <button
                             type="button"
                             onClick={() => removeFromCart(item.productId)}
@@ -1117,9 +1071,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                         </div>
                       </div>
 
-                      {/* Line 2: Quantity buttons, Unit price, Total */}
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
-                        {/* Quantity Counter */}
                         <div className="flex items-center gap-1.5">
                           <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
                             <button
@@ -1157,7 +1109,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           )}
                         </div>
 
-                        {/* Price calculation */}
                         <div className="text-right">
                           <span className="text-[11px] text-slate-500">
                             {formatMoney(item.unitPrice)} × {item.quantity} =
@@ -1175,10 +1126,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             )}
           </div>
 
-          {/* Cart Footer & Financial Calculations */}
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
-            
-            {/* Subtotal & Discount Row */}
             <div className="space-y-1.5 text-xs text-slate-600">
               <div className="flex justify-between">
                 <span>المجموع الأولي:</span>
@@ -1200,26 +1148,22 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               </div>
 
-              {/* Final Invoice Total */}
               <div className="flex justify-between text-base font-extrabold text-slate-900 pt-1.5 border-t border-slate-200">
                 <span>المبلغ المطلوب:</span>
                 <span className="text-emerald-700">{formatMoney(finalTotal)}</span>
               </div>
 
-              {/* Profit preview info */}
               <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded flex justify-between font-medium">
                 <span>صافي الربح التقديري للقائمة:</span>
                 <span className="font-bold">{formatMoney(estimatedProfit)}</span>
               </div>
             </div>
 
-            {/* Customer Box (منقول بالكامل للأسفل كما هو مطلوب) */}
             <div className={`p-3 rounded-2xl border flex flex-col gap-2.5 transition ${
               saleType === 'credit'
                 ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
                 : 'bg-slate-100/80 border-slate-200'
             }`}>
-              {/* Header: Label + Suggest/Add Customer Button */}
               <div className="flex items-center justify-between text-xs">
                 <span className={`font-bold flex items-center gap-1.5 ${
                   saleType === 'credit' ? 'text-amber-950 font-black' : 'text-slate-800'
@@ -1245,7 +1189,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </button>
               </div>
 
-              {/* Main Selector: Registered Customers */}
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
                   {saleType === 'credit' ? (
@@ -1281,7 +1224,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </select>
               </div>
 
-              {/* Credit Warning Banner when no customer is selected */}
               {saleType === 'credit' && !selectedCustomerId && (
                 <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-lg text-[11px] flex items-start gap-2 animate-fadeIn">
                   <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
@@ -1302,7 +1244,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               )}
 
-              {/* Selected Customer Card with Info & Debt Breakdown */}
               {selectedCustomer && (
                 <div className="bg-white border border-emerald-300 rounded-lg p-2.5 text-xs space-y-1.5 shadow-2xs">
                   <div className="flex items-center justify-between font-bold text-slate-900">
@@ -1333,7 +1274,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               )}
 
-              {/* In Direct Sale: Manual name/phone for receipt if not selecting from list */}
               {saleType === 'direct' && !selectedCustomerId && (
                 <div className="space-y-1 pt-1 border-t border-slate-200/60">
                   <span className="text-[11px] font-bold text-slate-600 block">
@@ -1358,7 +1298,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               )}
 
-              {/* Credit Sale Specific Inputs: Downpayment & Remaining */}
               {saleType === 'credit' && (
                 <div className="space-y-2 pt-2 border-t border-amber-200">
                   <div className="flex items-center justify-between">
@@ -1399,7 +1338,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
             </div>
 
-            {/* Notes */}
             <input
               type="text"
               placeholder="ملاحظات على القائمة (تظهر في الوصل)..."
@@ -1408,7 +1346,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
 
-            {/* Cart Error Notice Banner */}
             {cartErrorNotice && (
               <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fadeIn">
                 <div className="flex items-center gap-2">
@@ -1425,7 +1362,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             )}
 
-            {/* Credit Warning Alert right above action buttons if credit sale without registered customer */}
             {saleType === 'credit' && !selectedCustomerId && (
               <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -1435,7 +1371,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             )}
 
-            {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
@@ -1483,12 +1418,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     title="ماسح باركود نقطة البيع (POS)"
   />
 
-  {/* Quick Add Customer Modal */}
-  {showQuickAddModal && (
+  {showQuickAddCustomerModal && (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        
-        {/* Modal Header */}
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center">
@@ -1508,7 +1440,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           </button>
         </div>
 
-        {/* Modal Form */}
         <form onSubmit={handleSaveQuickCustomer} className="p-4 space-y-3">
           {quickCustomerError && (
             <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1.5">
@@ -1605,12 +1536,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     </div>
   )}
 
-  {/* Unfound Barcode Prompt Modal - يظهر تلقائياً عند قراءة باركود غير موجود في المخزن */}
   {unfoundBarcodePrompt && (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        
-        {/* Header */}
         <div className="p-4 border-b border-amber-200 bg-amber-50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center">
@@ -1630,7 +1558,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-5 space-y-4">
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
             <div className="text-xs text-slate-500 font-bold mb-1">الرمز الشريطي (الباركود) المقروء:</div>
@@ -1672,12 +1599,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     </div>
   )}
 
-  {/* Quick Price Edit Modal (تعديل السعر المباشر من جهة البحث عن المواد) */}
   {productForPriceEdit && (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        
-        {/* Header */}
         <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
@@ -1699,9 +1623,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSavePriceEdit} className="p-5 space-y-4">
-          {/* Retail Selling Price (سعر بيع المفرد) */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1">
               سعر بيع المفرد ({settings.currency}) <span className="text-emerald-600 font-bold">*</span>
@@ -1722,7 +1644,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             </div>
           </div>
 
-          {/* Wholesale Selling Price (سعر بيع الجملة) */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1">
               سعر بيع الجملة ({settings.currency})
@@ -1742,7 +1663,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             </div>
           </div>
 
-          {/* Cost Price (سعر الشراء / التكلفة) */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1">
               سعر الشراء / التكلفة ({settings.currency})
@@ -1762,7 +1682,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             </div>
           </div>
 
-          {/* Carton capacity (عدد القطع في الكرتون) */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
             <label className="block text-xs font-bold text-slate-700 mb-1">
               سعة الكرتون الواحد (كم قطعة بالكرتون):
@@ -1787,7 +1706,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             )}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-between pt-3 border-t border-slate-100">
             {onEditProduct && (
               <button
@@ -1828,3 +1746,5 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 </div>
   );
 };
+
+export default POSView;
