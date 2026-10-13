@@ -33,7 +33,10 @@ ipcMain.handle('print-silent', async (event, format = 'thermal') => {
     margins: { marginType: 'none' }
   };
 
-  if (format === 'thermal' || format === 'roll80' || format === 'receipt') {
+  // قياسات الورق بالميكرون (1mm = 1000 microns)
+  if (format === 'thermal58' || format === 'roll58' || format === '58mm') {
+    printOptions.pageSize = { width: 58000, height: 297000 }; // ورق كاشير 58mm
+  } else if (format === 'thermal' || format === 'roll80' || format === 'receipt' || format === 'thermal80') {
     printOptions.pageSize = { width: 80000, height: 297000 }; // ورق كاشير 80mm
   } else if (format === 'a5') {
     printOptions.pageSize = 'A5';
