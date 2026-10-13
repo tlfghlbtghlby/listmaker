@@ -111,6 +111,9 @@ export interface UserProfile {
   createdAt: string;
 }
 
+// أنواع مقاسات الورق المتاحة للطباعة
+export type PrintFormatType = 'a4' | 'a5' | 'thermal' | 'thermal80' | 'thermal58';
+
 export interface StoreSettings {
   storeName: string;
   ownerName: string;
@@ -118,13 +121,15 @@ export interface StoreSettings {
   address: string;
   currency: string; // مثلاً: د.ع (دينار عراقي) أو $ أو ر.س
   invoiceFooterNote: string;
-  printFormat: 'a4' | 'thermal'; // A4 رسمي أو رول 80 مم
+  printFormat: PrintFormatType; // A4 أو A5 أو رول 80 مم أو رول 58 مم
+  directPrintEnabled?: boolean; // تفعيل الطباعة الفورية الصامتة بدون نافذة حوار
   enableWholesale: boolean; // تفعيل أو إلغاء إظهار سعر بيع الجملة
   deviceMode: DeviceMode; // وضع الحاسبة أو وضع الهاتف (Android / iPhone)
-  desktopLayout: DesktopLayoutMode; // 'full' = وضع الكمبيوتر الكامل (شاشة مستطيلة جانبية: المواد وبجانبها القائمة), 'partial' = وضع الكمبيوتر الجزئي
+  desktopLayout: DesktopLayoutMode; // 'full' = وضع الكمبيوتر الكامل, 'partial' = وضع الكمبيوتر الجزئي
+  
   // تخصيص نصوص وترويسة القائمة حسب رغبة صاحب المحل
-  headerRightSealText?: string; // مثلاً "جملة" أو "تجزئة" أو "مورد" أو أي نص
+  headerRightSealText?: string; // مثلاً "جملة" أو "تجزئة" أو "مورد"
   headerLeftSealText?: string; // مثلاً "مفرد" أو "قطع" أو "نقد"
-  businessSubtitle?: string; // مثلاً "تجارة عامة وبيع الجملة والمفرد" أو "لتجارة المواد الإنشائية والكهربائية"
+  businessSubtitle?: string; // مثلاً "تجارة عامة وبيع الجملة والمفرد"
   managerLabel?: string; // مثلاً "بإدارة" أو "إشراف" أو "المدير العام"
 }
