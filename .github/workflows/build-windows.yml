@@ -5,6 +5,10 @@ on:
     branches: [ "windows", "main" ]
   workflow_dispatch:
 
+# 1. إعطاء تصريح الكتابة لمستودعك لإنشاء Releases
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -21,8 +25,11 @@ jobs:
     - name: Install Packages
       run: npm install --legacy-peer-deps
 
+    # 2. تمرير التوكن تلقائياً لأداة البناء
     - name: Package Windows Installer
       run: npm run electron:build
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload Executable
       uses: actions/upload-artifact@v4
