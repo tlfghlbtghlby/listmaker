@@ -1,0 +1,32 @@
+name: Build Windows App (.exe)
+
+on:
+  push:
+    branches: [ "windows", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install Packages
+      run: npm ci
+
+    - name: Package Windows Installer
+      run: npm run electron:build
+
+    - name: Upload Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: ListMaker-Windows-Setup
+        path: dist-electron/*.exe
