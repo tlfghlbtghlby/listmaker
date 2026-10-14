@@ -175,5 +175,16 @@
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
-}
 
+  /* 6. دعم حاوية الطباعة الصامتة الفورية في Electron */
+  #direct-print-offscreen-container,
+  .direct-print-offscreen {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+}
