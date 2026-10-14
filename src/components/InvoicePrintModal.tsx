@@ -9,8 +9,6 @@ import {
   FileText, 
   Receipt,
   FileDown,
-  Bluetooth,
-  RefreshCw,
   Info,
   ArrowDownAZ
 } from 'lucide-react';
@@ -42,23 +40,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const [isCopied, setIsCopied] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  // Ensure native Ctrl+P / browser print invocation also starts at top 0 of Page 1
-  useEffect(() => {
-    const handleBeforePrint = () => {
-      window.scrollTo(0, 0);
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = 0;
-      }
-    };
-
-    window.addEventListener('beforeprint', handleBeforePrint);
-    return () => {
-      window.removeEventListener('beforeprint', handleBeforePrint);
-    };
-  }, []);
 
   if (!invoice) return null;
 
@@ -97,30 +78,31 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       })
     : invoice.items;
 
-  // Native Print with absolute top scroll reset
-  const handlePrint = () => {
-    // 1. Reset window and document scroll to top so print engine starts at top of page 1
-    window.scrollTo(0, 0);
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-
-    // 2. Reset modal inner scroll area to top (0)
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
+  // طباعة مخصصة لتطبيق Electron المكتبي فقط
+  const handlePrint = async () => {
+    if (typeof window !== 'undefined' && window.electronAPI?.printDirect) {
+      try {
+        const pageSize = printLayout === 'a4' ? 'A4' : printLayout === 'a5' ? 'A5' : '80mm';
+        await window.electronAPI.printDirect({
+          silent: false,
+          paperSize: printLayout,
+          pageSize,
+        });
+      } catch (err) {
+        console.error('خطأ في إرسال أمر الطباعة عبر Electron:', err);
+      }
+    } else {
+      console.warn('تنبيه: ميزة الطباعة متاحة فقط داخل تطبيق Electron المكتبي');
+      setPdfNotice('الطباعة متاحة فقط عبر تطبيق الويندوز المكتبي (Electron)');
+      setTimeout(() => setPdfNotice(null), 3000);
     }
-
-    // 3. Small timeout to allow browser layout to flush scroll offset before opening print dialog
-    setTimeout(() => {
-      window.print();
-    }, 50);
   };
 
-  // Generate high quality PDF Blob using html-to-image & jsPDF (safe from oklch errors and renders Arabic letters connected)
+  // Generate high quality PDF Blob using html-to-image & jsPDF
   const generateInvoicePDF = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     const element = document.getElementById('printable-invoice');
     if (!element) return null;
 
-    // Use toPng to capture DOM with native browser text-shaper & font ligatures
     const dataUrl = await toPng(element, {
       quality: 1,
       pixelRatio: 2.5,
@@ -133,7 +115,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       },
     });
 
-    // Determine dimensions from generated image
     const img = new Image();
     img.src = dataUrl;
     await new Promise((resolve) => {
@@ -165,7 +146,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       const imgHeight = imgWidth * aspect;
       pdf.addImage(dataUrl, 'PNG', 4, 4, imgWidth, Math.min(imgHeight, pdfHeight - 8));
     } else {
-      // Standard A4
       pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -197,7 +177,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setPdfNotice('تم تحميل ملف PDF بنجاح بحروف عربية واضحة');
+      setPdfNotice('تم حفظ ملف PDF بنجاح');
       setTimeout(() => setPdfNotice(null), 4000);
     } catch (err) {
       console.error('Error generating PDF:', err);
@@ -208,7 +188,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
     }
   };
 
-  // 2. WhatsApp Share: Generates PDF and shares it to WhatsApp
+  // 2. WhatsApp Share
   const handleShareWhatsApp = async () => {
     setIsGeneratingPDF(true);
     setPdfNotice(null);
@@ -218,7 +198,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
       const file = new File([result.blob], result.fileName, { type: 'application/pdf' });
 
-      // Summary text for WhatsApp message
       let summaryText = `📋 *فاتورة مبيعات: ${settings.storeName}*\n`;
       summaryText += `رقم القائمة: ${invoice.invoiceNumber}\n`;
       summaryText += `التاريخ: ${dayName} ${dateFormatted}\n`;
@@ -229,7 +208,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       }
       summaryText += `\n📄 مرفق ملف القائمة بصيغة PDF.`;
 
-      // A) Try Web Share API with File (Native support on Mobile Android & iOS WhatsApp)
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           title: `قائمة ${invoice.invoiceNumber}`,
@@ -241,7 +219,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         return;
       }
 
-      // B) Desktop / Browser fallback: Download PDF and open WhatsApp
       const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
       a.href = url;
@@ -290,28 +267,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
     }
   };
 
-  // 3. Bluetooth Print
-  const handleBluetoothPrint = async () => {
-    try {
-      if ('bluetooth' in navigator) {
-        await (navigator as any).bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
-        });
-      } else {
-        setPrintLayout('thermal');
-        setTimeout(() => window.print(), 200);
-      }
-    } catch (e) {
-      setPrintLayout('thermal');
-      setTimeout(() => window.print(), 200);
-    }
-  };
-
   return (
     <div className="print-modal-overlay fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
       
-      {/* Dynamic page print styling based on chosen format */}
+      {/* Stylesheet الخاصة برندر الفاتورة المطبوعة داخل نافذة Electron */}
       <style dangerouslySetInnerHTML={{
         __html: `
           @media print {
@@ -328,10 +287,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
       <div className="print-modal-card bg-white rounded-2xl border border-slate-300 shadow-2xl max-w-4xl w-full max-h-[96vh] flex flex-col overflow-hidden">
         
-        {/* Top Controls Bar (Hidden in Print) */}
+        {/* Top Controls Bar */}
         <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2.5 no-print">
           
-          {/* Format Selector Tabs & Print Options */}
+          {/* Format Selector Tabs */}
           <div className="flex items-center gap-2.5 flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold text-slate-700">تنسيق الطباعة:</span>
@@ -377,7 +336,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
             </div>
 
-            {/* خيار تحكم اختياري: ترتيب المواد أبجدياً (أ - ي) */}
+            {/* فرز أبجدي */}
             <div className="flex items-center gap-1.5 border-r border-slate-300 pr-2.5 sm:mr-1">
               <label 
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition select-none shadow-2xs ${
@@ -385,7 +344,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-1 ring-emerald-500/30'
                     : 'bg-white border-slate-300 hover:border-slate-400 text-slate-700'
                 }`}
-                title="إعادة فرز وترتيب المواد في القائمة المطبوعة فقط بحسب الحروف الأبجدية من أ إلى ي"
               >
                 <input
                   type="checkbox"
@@ -394,7 +352,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
                 />
                 <ArrowDownAZ className={`w-4 h-4 ${sortByAlphabet ? 'text-emerald-600' : 'text-slate-500'}`} />
-                <span>ترتيب المواد أبجدياً (أ - ي)</span>
+                <span>ترتيب أبجدي (أ - ي)</span>
                 {sortByAlphabet && (
                   <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-900 font-extrabold mr-0.5">
                     مفعل
@@ -404,27 +362,26 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             </div>
           </div>
 
-          {/* Action Buttons matching Screenshot 3 */}
+          {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             
-            {/* 1. Print Invoice Button */}
+            {/* طباعة Electron المباشرة */}
             <button
               type="button"
               onClick={handlePrint}
               className="px-3.5 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-black rounded-lg shadow-xs flex items-center gap-1.5 transition cursor-pointer"
-              title="طباعة القائمة مباشرة"
+              title="طباعة عبر نظام الويندوز المكتبي"
             >
               <Printer className="w-4 h-4" />
               <span>طباعة القائمة</span>
             </button>
 
-            {/* 2. Download / Save PDF Button */}
+            {/* حفظ PDF */}
             <button
               type="button"
               onClick={handleDownloadPDF}
               disabled={isGeneratingPDF}
               className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
-              title="حفظ وتحميل الفاتورة كملف PDF رسمي"
             >
               {isGeneratingPDF ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-700" />
@@ -434,24 +391,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <span>حفظ / تحميل PDF</span>
             </button>
 
-            {/* 3. Bluetooth Print Button */}
-            <button
-              type="button"
-              onClick={handleBluetoothPrint}
-              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
-              title="طباعة عبر طابعة بلوتوث محمولة"
-            >
-              <Bluetooth className="w-3.5 h-3.5 text-amber-600" />
-              <span>طباعة بلوتوث</span>
-            </button>
-
-            {/* 4. WhatsApp Share Button (Creates PDF & shares) */}
+            {/* واتساب */}
             <button
               type="button"
               onClick={handleShareWhatsApp}
               disabled={isGeneratingPDF}
               className="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-50 border border-emerald-400 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              title="إنشاء نسخة PDF من القائمة ومشاركتها عبر الواتساب"
             >
               {isGeneratingPDF ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
@@ -463,7 +408,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <span>واتساب (PDF)</span>
             </button>
 
-            {/* Close Button */}
+            {/* إغلاق */}
             <button
               type="button"
               onClick={onClose}
@@ -474,7 +419,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
           </div>
         </div>
 
-        {/* Action Notice Toast */}
+        {/* Action Notice */}
         {pdfNotice && (
           <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-xs font-bold text-emerald-800 flex items-center justify-between no-print animate-fadeIn">
             <div className="flex items-center gap-2">
@@ -496,7 +441,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
           ref={scrollContainerRef}
           className="print-invoice-scroll-area flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/80 flex justify-center print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:block"
         >
-          
           <div
             id="printable-invoice"
             dir="rtl"
@@ -510,28 +454,23 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             }`}
           >
 
-            {/* A4 and A5 Full Sheet Invoice matching exact layout in Screenshot 3 */}
+            {/* A4 & A5 Layout */}
             {printLayout !== 'thermal' ? (
               <div className="space-y-2.5 text-black leading-tight">
-                
-                {/* 1. Header Box with Corner Seals */}
+                {/* 1. Header Box */}
                 <div className="border border-black rounded-md p-2.5 sm:p-3 relative flex flex-col items-center justify-center text-center">
-                  
-                  {/* Right Seal: مخصص أو جملة / تجزئة */}
                   <div className="absolute right-2.5 top-2">
                     <StarburstSeal 
                       text={settings.headerRightSealText || (settings.enableWholesale ? "جملة" : "تجزئة")} 
                     />
                   </div>
 
-                  {/* Left Seal: مخصص أو مفرد / قطع */}
                   <div className="absolute left-2.5 top-2">
                     <StarburstSeal 
                       text={settings.headerLeftSealText || "مفرد"} 
                     />
                   </div>
 
-                  {/* Center Store Title */}
                   <h1 className="text-xl sm:text-2xl font-black text-black" style={{ letterSpacing: 'normal' }}>
                     {settings.storeName || 'انشائية المسعودي'}
                   </h1>
@@ -540,7 +479,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName} · {settings.businessSubtitle || 'تجارة عامة وبيع الجملة والمفرد'}
                   </div>
 
-                  {/* Address & Phone */}
                   {(settings.address || settings.phone) && (
                     <div className="text-[11px] font-semibold text-black mt-1 pt-1 border-t border-dotted border-black/40 w-full text-center">
                       {settings.address && <span>{settings.address}&nbsp;&nbsp;&nbsp;&nbsp;</span>}
@@ -549,7 +487,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   )}
                 </div>
 
-                {/* 2. Metadata Bar in single bordered box */}
+                {/* 2. Metadata Bar */}
                 <div className="border border-black rounded-md px-3 py-1.5 flex items-center justify-between text-xs font-bold text-black">
                   <div className="flex items-center gap-1.5">
                     <span>رقم القائمة:</span>
@@ -573,7 +511,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </div>
                 </div>
 
-                {/* 3. Customer Info Box in single bordered box */}
+                {/* 3. Customer Info */}
                 <div className="border border-black rounded-md px-3 py-1.5 grid grid-cols-2 gap-4 text-xs">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-black">حضرة السيد:</span>
@@ -590,7 +528,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </div>
                 </div>
 
-                {/* 4. Items Table matching exact structure in Screenshot 3 */}
+                {/* 4. Items Table */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-right text-xs border-collapse border border-black">
                     <thead>
@@ -617,42 +555,27 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
 
                         return (
                           <tr key={index} className="border-b border-black">
-                            {/* ت */}
                             <td className="border border-black py-1 px-1.5 text-center font-mono font-bold">
                               {index + 1}
                             </td>
-
-                            {/* المادة / التفاصيل */}
                             <td className="border border-black py-1 px-2.5 font-bold text-black text-xs sm:text-[13px]">
                               {item.productName}
                             </td>
-
-                            {/* التجهيز (Checkmark) */}
                             <td className="border border-black py-1 px-1.5 text-center text-black font-bold text-xs">
                               ✓
                             </td>
-
-                            {/* كارتون */}
                             <td className="border border-black py-1 px-1 text-center font-mono font-bold">
                               {!isPiece ? qtyFormatted : '-'}
                             </td>
-
-                            {/* قطعة */}
                             <td className="border border-black py-1 px-1 text-center font-mono font-bold">
                               {isPiece ? qtyFormatted : '-'}
                             </td>
-
-                            {/* السعر */}
                             <td className="border border-black py-1 px-2 text-center font-mono font-bold">
                               {item.unitPrice.toLocaleString()}
                             </td>
-
-                            {/* العملة */}
                             <td className="border border-black py-1 px-1.5 text-center font-bold text-[11px]">
                               {currencyLabel}
                             </td>
-
-                            {/* المبلغ */}
                             <td className="border border-black py-1 px-2.5 text-left font-mono font-black text-sm">
                               {item.total.toLocaleString()}
                             </td>
@@ -663,10 +586,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </table>
                 </div>
 
-                {/* 5. Bottom Financial Summary Ledger + Notes/Stamp matching Screenshot 3 */}
+                {/* 5. Bottom Financial Summary */}
                 <div className="avoid-break grid grid-cols-12 gap-2.5 pt-1">
-                  
-                  {/* Left side: Notes, Stamp, and Signatures (6 cols) */}
                   <div className="col-span-6 border border-black rounded-md p-2 flex flex-col justify-between text-xs">
                     <div>
                       <div className="font-bold text-black border-b border-dotted border-black/40 pb-1 mb-1 flex justify-between items-center">
@@ -684,7 +605,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     </div>
                   </div>
 
-                  {/* Right side: Financial Ledger Table identical to Screenshot 3 (6 cols) */}
                   <div className="col-span-6">
                     <table className="w-full text-right text-xs border-collapse border border-black">
                       <thead>
@@ -695,7 +615,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                         </tr>
                       </thead>
                       <tbody>
-                        {/* مبلغ القائمة (الصافي) */}
                         <tr className="border-b border-black font-bold">
                           <td className="border border-black py-1 px-2">مبلغ القائمة (الصافي)</td>
                           <td className="border border-black py-1 px-2 text-center font-mono font-bold">
@@ -706,7 +625,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           </td>
                         </tr>
 
-                        {/* الديون السابقة للزبون */}
                         <tr className="border-b border-black font-bold">
                           <td className="border border-black py-1 px-2">الديون السابقة للزبون</td>
                           <td className="border border-black py-1 px-2 text-center font-mono font-bold">
@@ -717,7 +635,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           </td>
                         </tr>
 
-                        {/* المجموع الكلي المطلوب */}
                         <tr className="border-b border-black font-black bg-slate-100/50">
                           <td className="border border-black py-1 px-2">المجموع الكلي المطلوب</td>
                           <td className="border border-black py-1 px-2 text-center font-mono font-black text-sm">
@@ -728,7 +645,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           </td>
                         </tr>
 
-                        {/* الواصل (المسدد نقداً) */}
                         <tr className="border-b border-black font-bold">
                           <td className="border border-black py-1 px-2">الواصل (المسدد نقداً)</td>
                           <td className="border border-black py-1 px-2 text-center font-mono font-bold text-emerald-800">
@@ -739,7 +655,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           </td>
                         </tr>
 
-                        {/* الباقي بذمة العميل */}
                         <tr className="font-black bg-slate-100">
                           <td className="border border-black py-1.5 px-2">الباقي بذمة العميل</td>
                           <td className="border border-black py-1.5 px-2 text-center font-mono font-black text-sm text-black">
@@ -752,43 +667,32 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       </tbody>
                     </table>
                   </div>
-
                 </div>
 
-                {/* 6. Footer Note identical to Screenshot 3 */}
+                {/* 6. Footer Note */}
                 <div className="flex items-center justify-between border-t border-black pt-1.5 text-[11px] font-bold text-black">
                   <span>صفحة 1</span>
-                  <span>
-                    {settings.invoiceFooterNote || 'شكراً لتعاملكم معنا'}
-                  </span>
+                  <span>{settings.invoiceFooterNote || 'شكراً لتعاملكم معنا'}</span>
                 </div>
-
               </div>
             ) : (
-              /* Thermal 80mm Receipt Layout */
+              /* Thermal 80mm Layout */
               <div className="space-y-2.5 leading-tight text-black font-mono">
-                {/* Header */}
                 <div className="text-center border-b border-dashed border-black pb-2">
                   <div className="font-black text-sm">{settings.storeName || 'انشائية المسعودي'}</div>
                   <div className="text-[10px] text-slate-700 mt-0.5">
                     {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName}
                   </div>
-                  {settings.businessSubtitle && (
-                    <div className="text-[9px] text-slate-600 mt-0.5">
-                      {settings.businessSubtitle}
-                    </div>
-                  )}
                   {settings.phone && <div className="text-[10px] text-slate-700">{settings.phone}</div>}
                   <div className="font-bold text-xs mt-1">
                     {invoice.status === 'returned'
-                      ? '** وصل قائمة مرتجعة (ملغاة) **'
+                      ? '** وصل قائمة مرتجعة **'
                       : invoice.type === 'direct'
                       ? '** وصل بيع مباشر **'
                       : '** وصل بيع آجل (دين) **'}
                   </div>
                 </div>
 
-                {/* Meta */}
                 <div className="text-[11px] space-y-0.5 border-b border-dashed border-black pb-2">
                   <div className="flex justify-between">
                     <span>رقم القائمة:</span>
@@ -802,15 +706,8 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>حضرة السيد:</span>
                     <span className="font-bold">{invoice.customerName}</span>
                   </div>
-                  {invoice.customerPhone && (
-                    <div className="flex justify-between">
-                      <span>الهاتف:</span>
-                      <span>{invoice.customerPhone}</span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Items */}
                 <div className="border-b border-dashed border-black pb-2 space-y-1">
                   {displayedItems.map((item, idx) => (
                     <div key={idx} className="flex flex-col">
@@ -823,7 +720,6 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   ))}
                 </div>
 
-                {/* Totals */}
                 <div className="space-y-1 border-b border-dashed border-black pb-2 font-bold text-xs">
                   <div className="flex justify-between">
                     <span>مبلغ القائمة:</span>
@@ -849,16 +745,13 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   </div>
                 </div>
 
-                {/* Footer */}
                 <div className="text-center text-[10px] pt-1 text-slate-700">
                   <p>{settings.invoiceFooterNote || 'شكراً لتعاملكم معنا'}</p>
                 </div>
-
               </div>
             )}
 
           </div>
-
         </div>
 
       </div>
