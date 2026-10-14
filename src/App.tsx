@@ -54,7 +54,6 @@ const MainContent: React.FC = () => {
     setInvoiceToPrint(invoice);
   };
 
-  // Show loading spinner while determining auth state
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white" dir="rtl">
@@ -65,7 +64,6 @@ const MainContent: React.FC = () => {
     );
   }
 
-  // If not logged in and not guest, show the Login screen directly
   if (!currentUser && !isGuest) {
     return (
       <AuthView
@@ -75,14 +73,23 @@ const MainContent: React.FC = () => {
     );
   }
 
+  const getActiveTabTitle = () => {
+    switch (activeTab) {
+      case 'inventory': return 'جدول المخزون الكامل';
+      case 'invoices': return 'سجل الفواتير والقوائم';
+      case 'customers': return 'حسابات الديون والعملاء';
+      case 'reports': return 'الأرباح والتقارير المالية';
+      case 'settings': return 'الإعدادات العامة والنسخ الاحتياطي';
+      default: return '';
+    }
+  };
+
   return (
     <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
-      {/* Top Header */}
       <Header 
         onOpenAuth={() => setIsGuest(false)}
       />
 
-      {/* Main Tab Navigation */}
       {!isFullComputerMode && (
         <Navigation
           activeTab={activeTab}
@@ -90,7 +97,6 @@ const MainContent: React.FC = () => {
         />
       )}
 
-      {/* Active Tab View */}
       <main className={`no-print flex-1 w-full mx-auto ${
         isMobile 
           ? 'max-w-2xl px-2.5 sm:px-4 py-3 sm:py-4' 
@@ -99,13 +105,141 @@ const MainContent: React.FC = () => {
           : 'max-w-7xl px-4 sm:px-6 lg:px-8 py-5'
       }`}>
         
-        {/* وضع الكمبيوتر الكامل: شريط العودة السريع */}
         {isFullComputerMode && activeTab !== 'pos' && (
           <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex items-center justify-between mb-4 shadow-sm border border-slate-800">
             <div className="flex items-center gap-2 text-xs font-bold">
               <span className="text-slate-400">أنت تتصفح حالياً:</span>
-              <span className="text-emerald-400">
-                {activeTab === 'inventory' && 'جدول المخزون الكامل'}
-                {activeTab === 'invoices' && 'سجل الفواتير والقوائم'}
-                {activeTab === 'customers' && 'حسابات الديون والعملاء'}
-                {activeTab === 'reports' &&
+              <span className="text-emerald-400">{getActiveTabTitle()}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('pos')}
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <ArrowRight className="w-3.5 h-3.5" />
+              <span>العودة لشاشة المواد وقائمة البيع</span>
+            </button>
+          </div>
+        )}
+
+        {isFullComputerMode && activeTab === 'pos' && (
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-white p-2 sm:px-3 rounded-xl border border-slate-200 shadow-2xs text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>وضع الكمبيوتر الكامل</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('inventory')}
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+              >
+                <Boxes className="w-3.5 h-3.5 text-slate-500" />
+                <span>المخزون الكامل</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('invoices')}
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5 text-slate-500" />
+                <span>سجل الفواتير</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('customers')}
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5 text-slate-500" />
+                <span>الديون والعملاء</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('reports')}
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+              >
+                <BarChart3 className="w-3.5 h-3.5 text-slate-500" />
+                <span>التقارير</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5 text-slate-500" />
+                <span>الإعدادات</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'pos' && (
+          <POSView
+            onInvoiceCreated={handleInvoiceCreated}
+            onOpenNewProduct={handleOpenNewProduct}
+            onEditProduct={handleOpenEditProduct}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        )}
+
+        {activeTab === 'inventory' && (
+          <InventoryView
+            onOpenNewProduct={handleOpenNewProduct}
+            onEditProduct={handleOpenEditProduct}
+            onOpenQuickAdd={() => {
+              setSettingsInitialTab('quick-add');
+              setActiveTab('settings');
+            }}
+          />
+        )}
+
+        {activeTab === 'invoices' && (
+          <InvoicesView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
+        {activeTab === 'customers' && (
+          <CustomersView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsView />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsView initialTab={settingsInitialTab} />
+        )}
+      </main>
+
+      <ProductModal
+        isOpen={isProductModalOpen}
+        productToEdit={productToEdit}
+        initialCode={initialBarcodeForNewProduct}
+        onClose={() => {
+          setIsProductModalOpen(false);
+          setProductToEdit(null);
+          setInitialBarcodeForNewProduct(undefined);
+        }}
+      />
+
+      <InvoicePrintModal
+        invoice={invoiceToPrint}
+        onClose={() => setInvoiceToPrint(null)}
+      />
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AppProvider>
+      <MainContent />
+    </AppProvider>
+  );
+}
