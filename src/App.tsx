@@ -227,4 +227,97 @@ const MainContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('settings')}
-                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-
+                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+                title="فتح إعدادات النظام والنسخ الاحتياطي"
+              >
+                <Settings className="w-3.5 h-3.5 text-slate-500" />
+                <span>الإعدادات</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'pos' && (
+          <POSView
+            onInvoiceCreated={handleInvoiceCreated}
+            onOpenNewProduct={handleOpenNewProduct}
+            onEditProduct={handleOpenEditProduct}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        )}
+
+        {activeTab === 'inventory' && (
+          <InventoryView
+            onOpenNewProduct={handleOpenNewProduct}
+            onEditProduct={handleOpenEditProduct}
+            onOpenQuickAdd={() => {
+              setSettingsInitialTab('quick-add');
+              setActiveTab('settings');
+            }}
+          />
+        )}
+
+        {activeTab === 'invoices' && (
+          <InvoicesView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
+        {activeTab === 'customers' && (
+          <CustomersView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsView />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsView initialTab={settingsInitialTab} />
+        )}
+      </main>
+
+      {/* Product Add/Edit Modal */}
+      <ProductModal
+        isOpen={isProductModalOpen}
+        productToEdit={productToEdit}
+        initialCode={initialBarcodeForNewProduct}
+        onClose={() => {
+          setIsProductModalOpen(false);
+          setProductToEdit(null);
+          setInitialBarcodeForNewProduct(undefined);
+        }}
+      />
+
+      {/* Invoice Print & Preview Modal */}
+      <InvoicePrintModal
+        invoice={invoiceToPrint}
+        onClose={() => setInvoiceToPrint(null)}
+      />
+
+      {/* عنصر الطباعة الصامتة المخفي الخاص بـ Electron */}
+      {directInvoice && (
+        <div
+          id="direct-print-offscreen-container"
+          aria-hidden="true"
+          className="fixed -left-[9999px] -top-[9999px] opacity-0 pointer-events-none direct-print-offscreen print:opacity-100 print:pointer-events-auto print:static print:left-auto print:top-auto print:block"
+        >
+          <PrintableInvoiceDoc
+            invoice={directInvoice}
+            settings={settings}
+            paperSize={settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4')}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AppProvider>
+      <MainContent />
+    </AppProvider>
+  );
+}
