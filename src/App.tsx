@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { Navigation, TabType } from './components/Navigation';
@@ -33,8 +33,11 @@ const MainContent: React.FC = () => {
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [initialBarcodeForNewProduct, setInitialBarcodeForNewProduct] = useState<string | undefined>(undefined);
 
-  // Invoice print modal
+  // Invoice print modal (للمعاينة اليدوية)
   const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
+
+  // فاتورة الطباعة الصامتة المباشرة لتطبيق Electron
+  const [directInvoice, setDirectInvoice] = useState<Invoice | null>(null);
 
   // Settings initial tab
   const [settingsInitialTab, setSettingsInitialTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'all'>('store');
@@ -50,12 +53,66 @@ const MainContent: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
+  // معالجة إنشاء الفاتورة الجديدة
   const handleInvoiceCreated = (invoice: Invoice) => {
-    // Show print dialog immediately after invoice creation
-    setInvoiceToPrint(invoice);
+    if (settings.directPrintEnabled) {
+      // توجيه الفاتورة مباشرة للطباعة الصامتة في Electron
+      setInvoiceToPrint(null);
+      setDirectInvoice(invoice);
+    } else {
+      // فتح نافذة المعاينة اليدوية المعتادة
+      setDirectInvoice(null);
+      setInvoiceToPrint(invoice);
+    }
   };
 
-  // Show loading spinner while determining auth state
+  // تنفيذ الطباعة الصامتة المباشرة
+  useEffect(() => {
+    if (!directInvoice) return;
+
+    let isMounted = true;
+    const executeSilentPrint = async () => {
+      // انتظار بسيط (80ms) للتأكد من رندرة الفاتورة في الـ DOM
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (!isMounted) return;
+
+      const paperSize = settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4');
+      const pageSize = paperSize === 'a4' ? 'A4' : paperSize === 'thermal58' ? '58mm' : '80mm';
+
+      // فحص وجود واجهة Electron (دعم كلا المسميين electronAPI و electron)
+      const electronBridge = (window as any).electronAPI || (window as any).electron;
+
+      if (typeof window !== 'undefined' && electronBridge) {
+        try {
+          if (typeof electronBridge.printDirect === 'function') {
+            await electronBridge.printDirect({
+              silent: true,
+              paperSize,
+              pageSize,
+            });
+          } else if (typeof electronBridge.printSilent === 'function') {
+            await electronBridge.printSilent(paperSize);
+          }
+        } catch (err) {
+          console.error('فشل في تنفيذ الطباعة الصامتة المباشرة:', err);
+        } finally {
+          if (isMounted) setDirectInvoice(null);
+        }
+      } else {
+        // في حال تشغيل المشروع من المتصفح العادي بدون Electron
+        console.warn('تطبيق Electron غير متاح، فتح نافذة الطباعة الافتراضية للمتصفح.');
+        window.print();
+        if (isMounted) setDirectInvoice(null);
+      }
+    };
+
+    executeSilentPrint();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [directInvoice, settings.printerPaperSize, settings.printFormat]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white" dir="rtl">
@@ -66,8 +123,6 @@ const MainContent: React.FC = () => {
     );
   }
 
-  // If not logged in and not guest, show the Login screen directly
-  // No store data is displayed until the user logs into their specific account
   if (!currentUser && !isGuest) {
     return (
       <AuthView
@@ -77,6 +132,17 @@ const MainContent: React.FC = () => {
     );
   }
 
+  const getActiveTabTitle = () => {
+    switch (activeTab) {
+      case 'inventory': return 'جدول المخزون الكامل';
+      case 'invoices': return 'سجل الفواتير والقوائم';
+      case 'customers': return 'حسابات الديون والعملاء';
+      case 'reports': return 'الأرباح والتقارير المالية';
+      case 'settings': return 'الإعدادات العامة والنسخ الاحتياطي';
+      default: return '';
+    }
+  };
+
   return (
     <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
       {/* Top Header */}
@@ -84,7 +150,7 @@ const MainContent: React.FC = () => {
         onOpenAuth={() => setIsGuest(false)}
       />
 
-      {/* Main Tab Navigation: يظهر في وضع الكمبيوتر الجزئي أو وضع الهاتف فقط */}
+      {/* Main Tab Navigation */}
       {!isFullComputerMode && (
         <Navigation
           activeTab={activeTab}
@@ -101,18 +167,12 @@ const MainContent: React.FC = () => {
           : 'max-w-7xl px-4 sm:px-6 lg:px-8 py-5'
       }`}>
         
-        {/* في وضع الكمبيوتر الكامل: شريط عودة سريع إذا انتقل المستخدم لصفحة أخرى */}
+        {/* في وضع الكمبيوتر الكامل: شريط عودة سريع */}
         {isFullComputerMode && activeTab !== 'pos' && (
           <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex items-center justify-between mb-4 shadow-sm border border-slate-800">
             <div className="flex items-center gap-2 text-xs font-bold">
               <span className="text-slate-400">أنت تتصفح حالياً:</span>
-              <span className="text-emerald-400">
-                {activeTab === 'inventory' && 'جدول المخزون الكامل'}
-                {activeTab === 'invoices' && 'سجل الفواتير والقوائم'}
-                {activeTab === 'customers' && 'حسابات الديون والعملاء'}
-                {activeTab === 'reports' && 'الأرباح والتقارير المالية'}
-                {activeTab === 'settings' && 'الإعدادات العامة والنسخ الاحتياطي'}
-              </span>
+              <span className="text-emerald-400">{getActiveTabTitle()}</span>
             </div>
             <button
               type="button"
@@ -125,7 +185,7 @@ const MainContent: React.FC = () => {
           </div>
         )}
 
-        {/* في وضع الكمبيوتر الكامل: شريط أدوات علوي مصغر للانتقال السريع دون إخفاء شاشة البيع الأساسية */}
+        {/* في وضع الكمبيوتر الكامل: شريط أدوات علوي */}
         {isFullComputerMode && activeTab === 'pos' && (
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-white p-2 sm:px-3 rounded-xl border border-slate-200 shadow-2xs text-xs">
             <div className="flex items-center gap-2">
@@ -229,7 +289,7 @@ const MainContent: React.FC = () => {
         )}
       </main>
 
-      {/* Product Add/Edit Modal */}
+      {/* نافذة إضافة وتعديل المواد */}
       <ProductModal
         isOpen={isProductModalOpen}
         productToEdit={productToEdit}
@@ -241,11 +301,25 @@ const MainContent: React.FC = () => {
         }}
       />
 
-      {/* Invoice Print & Preview Modal */}
+      {/* نافذة المعاينة والطباعة اليدوية المعتادة */}
       <InvoicePrintModal
         invoice={invoiceToPrint}
         onClose={() => setInvoiceToPrint(null)}
       />
+
+      {/* عنصر الطباعة الصامتة المخفي الخاص بـ Electron (يستخدم نفس المكون المعتمد لديك) */}
+      {directInvoice && (
+        <div
+          id="direct-print-offscreen-container"
+          aria-hidden="true"
+          className="fixed -left-[9999px] -top-[9999px] opacity-0 pointer-events-none direct-print-offscreen print:opacity-100 print:pointer-events-auto print:static print:left-auto print:top-auto print:block"
+        >
+          <InvoicePrintModal
+            invoice={directInvoice}
+            onClose={() => setDirectInvoice(null)}
+          />
+        </div>
+      )}
     </div>
   );
 };
