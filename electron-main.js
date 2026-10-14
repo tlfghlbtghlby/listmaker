@@ -22,13 +22,18 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'dist/index.html'));
 }
 
-// معالج الطباعة التلقائية الصامتة
-ipcMain.handle('print-silent', async (event, format = 'thermal') => {
+// دالة موحدة لتنفيذ الطباعة الصامتة
+const handlePrint = (event, optionsOrFormat = 'thermal') => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return false;
+  if (!win) return Promise.resolve(false);
 
-  let printOptions = {
-    silent: true,            // طباعة فورية بدون نافذة حوار ويندوز
+  // استخراج صيغة الورق سواء أُرسلت كنص مباشر أو داخل كائن
+  const format = typeof optionsOrFormat === 'string' 
+    ? optionsOrFormat 
+    : (optionsOrFormat?.paperSize || optionsOrFormat?.pageSize || 'thermal');
+
+  const printOptions = {
+    silent: true,            // طباعة فورية صامتة دون نافذة حوار ويندوز
     printBackground: true,   // طباعة التصاميم والألوان
     margins: { marginType: 'none' }
   };
@@ -38,7 +43,7 @@ ipcMain.handle('print-silent', async (event, format = 'thermal') => {
     printOptions.pageSize = { width: 58000, height: 297000 }; // ورق كاشير 58mm
   } else if (format === 'thermal' || format === 'roll80' || format === 'receipt' || format === 'thermal80') {
     printOptions.pageSize = { width: 80000, height: 297000 }; // ورق كاشير 80mm
-  } else if (format === 'a5') {
+  } else if (format === 'a5' || format === 'A5') {
     printOptions.pageSize = 'A5';
   } else {
     printOptions.pageSize = 'A4';
@@ -46,11 +51,17 @@ ipcMain.handle('print-silent', async (event, format = 'thermal') => {
 
   return new Promise((resolve) => {
     win.webContents.print(printOptions, (success, failureReason) => {
-      if (!success) console.warn('فشل أمر الطباعة الصامتة:', failureReason);
+      if (!success) {
+        console.warn('فشل أمر الطباعة الصامتة:', failureReason);
+      }
       resolve(success);
     });
   });
-});
+};
+
+// الاستماع للقناتين لضمان عمل الطباعة مهما كان استدعاؤها في الواجهة
+ipcMain.handle('print-silent', handlePrint);
+ipcMain.handle('print-direct', handlePrint);
 
 app.whenReady().then(createWindow);
 
