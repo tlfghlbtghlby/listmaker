@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { Navigation, TabType } from './components/Navigation';
@@ -39,6 +39,9 @@ const MainContent: React.FC = () => {
   // فاتورة الطباعة الصامتة المباشرة لتطبيق Electron
   const [directInvoice, setDirectInvoice] = useState<Invoice | null>(null);
 
+  // قفل لمنع إرسال أمر الطباعة مرتين لنفس الفاتورة
+  const isPrintingRef = useRef(false);
+
   // Settings initial tab
   const [settingsInitialTab, setSettingsInitialTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'all'>('store');
 
@@ -53,14 +56,13 @@ const MainContent: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
-  // معالجة إنشاء الفاتورة الجديدة
+  // معالجة إنشاء الفاتورة الجديدة مع منع التكرار
   const handleInvoiceCreated = (invoice: Invoice) => {
     if (settings.directPrintEnabled) {
-      // توجيه الفاتورة مباشرة للطباعة الصامتة في Electron
+      if (isPrintingRef.current) return; // تجاهل الأمر إن كان هناك أمر طباعة قيد التنفيذ
       setInvoiceToPrint(null);
       setDirectInvoice(invoice);
     } else {
-      // فتح نافذة المعاينة اليدوية المعتادة
       setDirectInvoice(null);
       setInvoiceToPrint(invoice);
     }
@@ -68,13 +70,18 @@ const MainContent: React.FC = () => {
 
   // تنفيذ الطباعة الصامتة المباشرة
   useEffect(() => {
-    if (!directInvoice) return;
+    if (!directInvoice || isPrintingRef.current) return;
 
+    isPrintingRef.current = true;
     let isMounted = true;
+
     const executeSilentPrint = async () => {
       // انتظار بسيط (80ms) للتأكد من رندرة الفاتورة في الـ DOM
       await new Promise((resolve) => setTimeout(resolve, 80));
-      if (!isMounted) return;
+      if (!isMounted) {
+        isPrintingRef.current = false;
+        return;
+      }
 
       const paperSize = settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4');
       const pageSize = paperSize === 'a4' ? 'A4' : paperSize === 'thermal58' ? '58mm' : '80mm';
@@ -96,13 +103,21 @@ const MainContent: React.FC = () => {
         } catch (err) {
           console.error('فشل في تنفيذ الطباعة الصامتة المباشرة:', err);
         } finally {
-          if (isMounted) setDirectInvoice(null);
+          if (isMounted) {
+            setDirectInvoice(null);
+            setTimeout(() => {
+              isPrintingRef.current = false;
+            }, 800); // إبقاء القفل مفعلاً لمنع ارتداد الأمر
+          }
         }
       } else {
         // في حال تشغيل المشروع من المتصفح العادي بدون Electron
         console.warn('تطبيق Electron غير متاح، فتح نافذة الطباعة الافتراضية للمتصفح.');
         window.print();
-        if (isMounted) setDirectInvoice(null);
+        if (isMounted) {
+          setDirectInvoice(null);
+          isPrintingRef.current = false;
+        }
       }
     };
 
@@ -307,7 +322,7 @@ const MainContent: React.FC = () => {
         onClose={() => setInvoiceToPrint(null)}
       />
 
-      {/* عنصر الطباعة الصامتة المخفي الخاص بـ Electron (يستخدم نفس المكون المعتمد لديك) */}
+      {/* عنصر الطباعة الصامتة المخفي الخاص بـ Electron */}
       {directInvoice && (
         <div
           id="direct-print-offscreen-container"
