@@ -13,7 +13,8 @@ import {
   collection,
   getDocs,
   query,
-  where
+  where,
+  enableNetwork
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { UserProfile, ADMIN_EMAIL } from './types';
@@ -31,7 +32,7 @@ export const firebaseConfig = {
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// تفعيل المحرك المحلي الدائم لحفظ البيانات على الجهاز والمزامنة التلقائية عند عودة الإنترنت
+// تفعيل المحرك المحلي الدائم لحفظ البيانات على القرص والمزامنة التلقائية عند عودة الإنترنت
 let firestoreDb: any;
 try {
   firestoreDb = initializeFirestore(app, {
@@ -46,6 +47,28 @@ try {
 
 export const db = firestoreDb;
 export const isFirebaseConfigured = true;
+
+// مراقبة عودة الإنترنت للمزامنة الفورية التلقائية
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', async () => {
+    try {
+      await enableNetwork(db);
+    } catch (e) {
+      console.warn('Network sync trigger error:', e);
+    }
+  });
+}
+
+// دالة جلب الجلسة الدائمة فور فتح البرنامج (حتى لو بعد 100 سنة بدون نت)
+export const getActiveLocalSession = (): UserProfile | null => {
+  try {
+    const session = localStorage.getItem('active_client_session');
+    if (session) {
+      return JSON.parse(session);
+    }
+  } catch (e) {}
+  return null;
+};
 
 // Authentication helpers
 export const loginWithEmailOrUsername = async (identifier: string, password: string) => {
@@ -69,27 +92,54 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     return adminUser as any;
   }
 
-  // 2. البحث في Firestore عن الحساب (عبر اسم المستخدم أو الإيميل أو رقم الهاتف)
+  // 2. التحقق من الحساب المخزن محلياً للطوارئ (إذا كان النت مقطوعاً تماماً)
+  if (!navigator.onLine) {
+    const cached = getActiveLocalSession();
+    if (
+      cached &&
+      (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)
+    ) {
+      return {
+        uid: cached.uid,
+        email: cached.email,
+        displayName: cached.displayName || cached.username,
+      } as any;
+    }
+  }
+
+  // 3. البحث في Firestore عن الحساب (من الذاكرة المؤقتة الدائمة أو السيرفر)
   const usersRef = collection(db, 'users');
   let matchedUser: any = null;
 
-  // فحص بالبريد أو اسم المستخدم
-  const qUsername = query(usersRef, where('username', '==', identifier.trim()));
-  const snapUsername = await getDocs(qUsername);
-  if (!snapUsername.empty) {
-    matchedUser = snapUsername.docs[0].data();
-  } else {
-    const qEmail = query(usersRef, where('email', '==', identifier.trim()));
-    const snapEmail = await getDocs(qEmail);
-    if (!snapEmail.empty) {
-      matchedUser = snapEmail.docs[0].data();
+  try {
+    const qUsername = query(usersRef, where('username', '==', identifier.trim()));
+    const snapUsername = await getDocs(qUsername);
+    if (!snapUsername.empty) {
+      matchedUser = snapUsername.docs[0].data();
     } else {
-      const qPhone = query(usersRef, where('phone', '==', identifier.trim()));
-      const snapPhone = await getDocs(qPhone);
-      if (!snapPhone.empty) {
-        matchedUser = snapPhone.docs[0].data();
+      const qEmail = query(usersRef, where('email', '==', identifier.trim()));
+      const snapEmail = await getDocs(qEmail);
+      if (!snapEmail.empty) {
+        matchedUser = snapEmail.docs[0].data();
+      } else {
+        const qPhone = query(usersRef, where('phone', '==', identifier.trim()));
+        const snapPhone = await getDocs(qPhone);
+        if (!snapPhone.empty) {
+          matchedUser = snapPhone.docs[0].data();
+        }
       }
     }
+  } catch (err) {
+    // في حال فشل الاستعلام تماماً لعدم وجود نت، نتحقق من الكاش المخزن
+    const cached = getActiveLocalSession();
+    if (cached && (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)) {
+      return {
+        uid: cached.uid,
+        email: cached.email,
+        displayName: cached.displayName || cached.username,
+      } as any;
+    }
+    throw new Error('لا يوجد اتصال بالإنترنت ولم يتم العثور على جلسة سابقة لهذا الجهاز.');
   }
 
   if (!matchedUser) {
