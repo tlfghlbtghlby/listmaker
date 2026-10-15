@@ -5,9 +5,10 @@ import {
   onSnapshot, 
   setDoc, 
   updateDoc, 
-  deleteDoc 
+  deleteDoc,
+  enableNetwork 
 } from 'firebase/firestore';
-import { db, logoutAccount } from '../firebase';
+import { db, logoutAccount, getActiveLocalSession } from '../firebase';
 import { User } from 'firebase/auth';
 import { 
   Product, 
@@ -89,26 +90,97 @@ export const sanitizeForFirestore = <T = any>(obj: T): T => {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  // قراءة الجلسة فوراً عند الإقلاع دون انتظار السيرفر لمنع أي شاشة تسجيل دخول أوفلاين
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    try {
+      const active = localStorage.getItem('active_client_session');
+      return active ? JSON.parse(active) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [authLoading, setAuthLoading] = useState<boolean>(() => {
+    try {
+      const active = localStorage.getItem('active_client_session');
+      return !active;
+    } catch {
+      return true;
+    }
+  });
+
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_pos_products');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [customers, setCustomers] = useState<Customer[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_pos_customers');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [invoices, setInvoices] = useState<Invoice[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_pos_invoices');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(defaultEmptySettings);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [isCloudConnected, setIsCloudConnected] = useState(true);
+  const [settings, setSettings] = useState<StoreSettings>(() => {
+    try {
+      const cached = localStorage.getItem('cached_pos_settings');
+      return cached ? JSON.parse(cached) : defaultEmptySettings;
+    } catch {
+      return defaultEmptySettings;
+    }
+  });
+
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
+  // مراقبة عودة الإنترنت للمزامنة الفورية وتحديث الحالة
   useEffect(() => {
-    try {
-      const active = localStorage.getItem('active_client_session');
-      if (active) setCurrentUser(JSON.parse(active));
-    } catch (e) {}
-    setAuthLoading(false);
+    const handleOnline = async () => {
+      setIsCloudConnected(true);
+      setSyncNotice('✅ عاد الاتصال: جاري المزامنة الفورية مع السحابة...');
+      try {
+        await enableNetwork(db);
+        setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
+        setTimeout(() => setSyncNotice(null), 4000);
+      } catch (err) {
+        console.warn('Sync trigger error:', err);
+      }
+    };
+
+    const handleOffline = () => {
+      setIsCloudConnected(false);
+      setSyncNotice('⚡ أنت تعمل الآن في الوضع المحلي الدائم (بدون إنترنت).');
+      setTimeout(() => setSyncNotice(null), 4000);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
+  // المزامنة والاستماع الدائم لبيانات المستخدم
   useEffect(() => {
     if (!currentUser) {
       setProducts([]);
@@ -116,13 +188,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setInvoices([]);
       setPayments([]);
       setSettings(defaultEmptySettings);
+      setAuthLoading(false);
       return;
     }
 
+    setAuthLoading(false);
     const currentUid = currentUser.uid;
     const isAdmin = currentUser.role === 'admin';
 
-    // إذا كان حساب مدير عام: تبقى الشاشة نظيفة ومخصصة للوحة التحكم المركزية
     if (isAdmin) {
       setProducts([]);
       setCustomers([]);
@@ -136,7 +209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // فلترة المواد بدقة: مواد منتظر السابقة تظهر له فقط، وأي مواد جديدة تظهر لمالكها فقط
+    // فلترة المواد ومزامنتها محلياً وسحابياً
     const unsubItems = onSnapshot(collection(db, 'items'), (snap) => {
       const list = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
@@ -145,9 +218,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return item.ownerUid === currentUid;
         });
       setProducts(list);
+      try {
+        localStorage.setItem('cached_pos_products', JSON.stringify(list));
+      } catch (e) {}
       setIsCloudConnected(true);
       setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
-    }, () => setIsCloudConnected(false));
+    }, () => {
+      setIsCloudConnected(false);
+    });
 
     // فلترة الفواتير
     const unsubInv = onSnapshot(collection(db, 'invoices'), (snap) => {
@@ -158,6 +236,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return inv.ownerUid === currentUid;
         });
       setInvoices(list);
+      try {
+        localStorage.setItem('cached_pos_invoices', JSON.stringify(list));
+      } catch (e) {}
     }, () => {});
 
     // فلترة الزبائن والديون
@@ -169,19 +250,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return cust.ownerUid === currentUid;
         });
       setCustomers(list);
+      try {
+        localStorage.setItem('cached_pos_customers', JSON.stringify(list));
+      } catch (e) {}
     }, () => {});
 
     // جلب إعدادات المتجر المناسبة للمستخدم
     const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
     const unsubSettings = onSnapshot(doc(db, 'settings', settingsDocId), (snap) => {
       if (snap.exists()) {
-        setSettings(prev => ({ ...prev, ...(snap.data() as StoreSettings) }));
+        const loaded = snap.data() as StoreSettings;
+        setSettings(prev => {
+          const combined = { ...prev, ...loaded };
+          try {
+            localStorage.setItem('cached_pos_settings', JSON.stringify(combined));
+          } catch (e) {}
+          return combined;
+        });
       } else {
-        setSettings({
+        const basicSettings = {
           ...defaultEmptySettings,
           storeName: currentUser.storeName || 'نظام المبيعات والمخزن',
           ownerName: currentUser.displayName || '',
-        });
+        };
+        setSettings(basicSettings);
+        try {
+          localStorage.setItem('cached_pos_settings', JSON.stringify(basicSettings));
+        } catch (e) {}
       }
     }, () => {});
 
@@ -197,12 +292,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSyncing(true);
     setSyncNotice(null);
     try {
+      await enableNetwork(db);
       setIsCloudConnected(true);
       setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
-      setSyncNotice(`تم الاتصال بالسحابة: ${products.length} مادة`);
+      setSyncNotice(`تمت المزامنة بنجاح: ${products.length} مادة`);
       setTimeout(() => setSyncNotice(null), 3000);
     } catch {
       setIsCloudConnected(false);
+      setSyncNotice('تعذر الاتصال بالسحابة حالياً، البيانات محفوظة محلياً.');
+      setTimeout(() => setSyncNotice(null), 3000);
     } finally {
       setIsSyncing(false);
     }
@@ -220,7 +318,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: now,
     };
     setDoc(doc(db, 'items', newId), sanitizeForFirestore(newProduct), { merge: true }).catch(() => {});
-    setProducts(prev => [newProduct, ...prev]);
+    setProducts(prev => {
+      const updated = [newProduct, ...prev];
+      try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
     return newProduct;
   };
 
@@ -235,19 +337,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDoc(doc(db, 'items', newId), sanitizeForFirestore(full), { merge: true }).catch(() => {});
       if (onProgress) onProgress(i + 1, itemsData.length);
     }
-    setProducts(prev => [...created, ...prev]);
+    setProducts(prev => {
+      const updated = [...created, ...prev];
+      try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
     return { success: true, count: created.length, products: created };
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
     const finalUpdates = { ...updates, updatedAt: new Date().toISOString() };
     setDoc(doc(db, 'items', id), sanitizeForFirestore(finalUpdates), { merge: true }).catch(() => {});
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...finalUpdates } : p));
+    setProducts(prev => {
+      const updated = prev.map(p => p.id === id ? { ...p, ...finalUpdates } : p);
+      try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const deleteProduct = (id: string) => {
     deleteDoc(doc(db, 'items', id)).catch(() => {});
-    setProducts(prev => prev.filter(p => p.id !== id));
+    setProducts(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const adjustStock = (id: string, delta: number) => {
@@ -256,7 +370,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!t) return prev;
       const newStock = Math.max(0, t.stock + delta);
       updateDoc(doc(db, 'items', id), sanitizeForFirestore({ stock: newStock })).catch(() => {});
-      return prev.map(p => p.id === id ? { ...p, stock: newStock } : p);
+      const updated = prev.map(p => p.id === id ? { ...p, stock: newStock } : p);
+      try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
+      return updated;
     });
   };
 
@@ -273,18 +389,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setDoc(doc(db, 'customers', newId), sanitizeForFirestore(newCust)).catch(() => {});
-    setCustomers(prev => [newCust, ...prev]);
+    setCustomers(prev => {
+      const updated = [newCust, ...prev];
+      try { localStorage.setItem('cached_pos_customers', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
     return newCust;
   };
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
     setDoc(doc(db, 'customers', id), sanitizeForFirestore(updates), { merge: true }).catch(() => {});
-    setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    setCustomers(prev => {
+      const updated = prev.map(c => c.id === id ? { ...c, ...updates } : c);
+      try { localStorage.setItem('cached_pos_customers', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const deleteCustomer = (id: string) => {
     deleteDoc(doc(db, 'customers', id)).catch(() => {});
-    setCustomers(prev => prev.filter(c => c.id !== id));
+    setCustomers(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      try { localStorage.setItem('cached_pos_customers', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const createInvoice = (data: CreateInvoiceInput) => {
@@ -328,7 +456,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setDoc(doc(db, 'invoices', newId), sanitizeForFirestore(newInv)).catch(() => {});
     items.forEach(i => adjustStock(i.productId, -(i.deductedPieces ?? i.quantity)));
-    setInvoices(prev => [newInv, ...prev]);
+    setInvoices(prev => {
+      const updated = [newInv, ...prev];
+      try { localStorage.setItem('cached_pos_invoices', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
     return newInv;
   };
 
@@ -337,7 +469,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!inv) return;
     deleteDoc(doc(db, 'invoices', id)).catch(() => {});
     inv.items.forEach(i => adjustStock(i.productId, i.deductedPieces ?? i.quantity));
-    setInvoices(prev => prev.filter(i => i.id !== id));
+    setInvoices(prev => {
+      const updated = prev.filter(i => i.id !== id);
+      try { localStorage.setItem('cached_pos_invoices', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
   };
 
   const returnInvoice = async (id: string): Promise<boolean> => {
@@ -345,7 +481,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!inv || inv.status === 'returned') return false;
     inv.items.forEach(i => adjustStock(i.productId, i.deductedPieces ?? i.quantity));
     await updateDoc(doc(db, 'invoices', id), sanitizeForFirestore({ status: 'returned' })).catch(() => {});
-    setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: 'returned' } : i));
+    setInvoices(prev => {
+      const updated = prev.map(i => i.id === id ? { ...i, status: 'returned' } : i);
+      try { localStorage.setItem('cached_pos_invoices', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
     return true;
   };
 
@@ -373,6 +513,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentUid = currentUser?.uid;
       const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
       setDoc(doc(db, 'settings', settingsDocId), sanitizeForFirestore(u), { merge: true }).catch(() => {});
+      try { localStorage.setItem('cached_pos_settings', JSON.stringify(u)); } catch (e) {}
       return u;
     });
   };
@@ -383,6 +524,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomers([]);
     setInvoices([]);
     setPayments([]);
+    try {
+      localStorage.removeItem('cached_pos_products');
+      localStorage.removeItem('cached_pos_customers');
+      localStorage.removeItem('cached_pos_invoices');
+    } catch (e) {}
   };
 
   const exportDataJSON = () => JSON.stringify({ products, customers, invoices, payments, settings }, null, 2);
@@ -403,6 +549,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.removeItem('active_client_session');
       localStorage.removeItem('last_active_user_uid');
+      localStorage.removeItem('cached_pos_products');
+      localStorage.removeItem('cached_pos_customers');
+      localStorage.removeItem('cached_pos_invoices');
+      localStorage.removeItem('cached_pos_settings');
     } catch (e) {}
     await logoutAccount();
   };
