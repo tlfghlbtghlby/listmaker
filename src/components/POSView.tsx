@@ -31,7 +31,7 @@ import {
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface POSViewProps {
-  onInvoiceCreated: (invoice: Invoice) => void;
+  onInvoiceCreated: (invoice: Invoice, andPrint: boolean) => void;
   onOpenNewProduct: (initialBarcode?: string) => void;
   onEditProduct?: (product: Product) => void;
   onOpenSettings?: () => void;
@@ -127,7 +127,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       piecesPerCarton: newCarton,
     });
 
-    // Also update any item in the active cart with this product
     setCartItems(prev => prev.map(item => {
       if (item.productId === productForPriceEdit.id) {
         const isWholesale = item.priceType === 'wholesale';
@@ -192,7 +191,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     return customers.find((c) => c.id === selectedCustomerId);
   }, [customers, selectedCustomerId]);
 
-  // Update customer selection
   const handleSelectCustomer = (id: string) => {
     setSelectedCustomerId(id);
     if (id) {
@@ -239,7 +237,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setTimeout(() => setScanNotice(null), 4000);
   };
 
-  // Add product to cart with chosen price type
   const addToCartWithPrice = (product: Product, priceType: PriceType, delta = 1) => {
     setCartItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.productId === product.id);
@@ -473,7 +470,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const previousCustomerDebt = selectedCustomer ? selectedCustomer.totalDebt : 0;
   const newCustomerDebt = previousCustomerDebt + remainingDebt;
 
-  // Handle Submit
+  // حفظ الفاتورة واستدعاء الطباعة فقط إذا كان andPrint = true
   const handleSaveInvoice = (andPrint: boolean) => {
     if (cartItems.length === 0) {
       setCartErrorNotice('الرجاء إضافة مادة واحدة على الأقل إلى القائمة');
@@ -539,12 +536,8 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       setCustomerPhone('');
     }
 
-    // إرسال أمر الطباعة الصامتة المباشرة إذا كانت مفعلة في الإعدادات وكان التطبيق يعمل داخل Electron
-    if (andPrint && settings.directPrintEnabled && (window as any).electronAPI?.printSilent) {
-      (window as any).electronAPI.printSilent(settings.printFormat || 'thermal58');
-    }
-
-    onInvoiceCreated(created);
+    // تم حذف الاستدعاء المكرر هنا بالكامل، وتمرير خيار andPrint إلى المكون الأب App.tsx
+    onInvoiceCreated(created, andPrint);
   };
 
   const isMobileMode = settings.deviceMode === 'mobile';
@@ -965,7 +958,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             ) : (
               <div className="space-y-2">
                 {cartItems.map((item) => {
-                  const itemProfit = (item.unitPrice - item.costPrice) * item.quantity;
                   const cartonCapacity = item.piecesPerCarton || 1;
                   const isCarton = item.unitType === 'carton';
                   const prodRef = products.find(p => p.id === item.productId);
@@ -1237,7 +1229,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                       onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
                       className="mt-1.5 px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-md font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer transition shadow-2xs"
                     >
-                      <UserPlus className="w-3 h-3" />
+                      <UserPlus className="w-3.5 h-3.5" />
                       <span>اقتراح إضافة هذا الزبون الآن</span>
                     </button>
                   </div>
@@ -1373,9 +1365,10 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
+                type="button"
                 disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                 onClick={() => handleSaveInvoice(true)}
-                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
                 title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة'}
               >
                 <Printer className="w-4 h-4" />
@@ -1383,10 +1376,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </button>
 
               <button
+                type="button"
                 disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                 onClick={() => handleSaveInvoice(false)}
-                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition"
-                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط'}
+                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط دون طباعة'}
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>حفظ فقط</span>
@@ -1395,8 +1389,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
             {cartItems.length > 0 && (
               <button
+                type="button"
                 onClick={clearCart}
-                className="text-[11px] text-slate-500 hover:text-rose-600 text-center transition py-0.5"
+                className="text-[11px] text-slate-500 hover:text-rose-600 text-center transition py-0.5 cursor-pointer"
               >
                 تفريغ القائمة وإلغاء المواد
               </button>
