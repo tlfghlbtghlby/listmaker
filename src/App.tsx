@@ -56,10 +56,15 @@ const MainContent: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
-  // معالجة إنشاء الفاتورة الجديدة مع منع التكرار
-  const handleInvoiceCreated = (invoice: Invoice) => {
+  // معالجة إنشاء الفاتورة: إذا ضغط "حفظ فقط" لا يطبع، وإذا ضغط "حفظ وطباعة" يرسل أمراً واحداً فقط
+  const handleInvoiceCreated = (invoice: Invoice, andPrint: boolean) => {
+    if (!andPrint) {
+      // تم حفظ الفاتورة بنجاح في قاعدة البيانات، ولا يتم إرسال أي أمر للطابعة
+      return;
+    }
+
     if (settings.directPrintEnabled) {
-      if (isPrintingRef.current) return; // تجاهل الأمر إن كان هناك أمر طباعة قيد التنفيذ
+      if (isPrintingRef.current) return;
       setInvoiceToPrint(null);
       setDirectInvoice(invoice);
     } else {
@@ -68,7 +73,7 @@ const MainContent: React.FC = () => {
     }
   };
 
-  // تنفيذ الطباعة الصامتة المباشرة
+  // تنفيذ الطباعة الصامتة المباشرة لمرة واحدة فقط
   useEffect(() => {
     if (!directInvoice || isPrintingRef.current) return;
 
@@ -76,7 +81,6 @@ const MainContent: React.FC = () => {
     let isMounted = true;
 
     const executeSilentPrint = async () => {
-      // انتظار بسيط (80ms) للتأكد من رندرة الفاتورة في الـ DOM
       await new Promise((resolve) => setTimeout(resolve, 80));
       if (!isMounted) {
         isPrintingRef.current = false;
@@ -86,7 +90,6 @@ const MainContent: React.FC = () => {
       const paperSize = settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4');
       const pageSize = paperSize === 'a4' ? 'A4' : paperSize === 'thermal58' ? '58mm' : '80mm';
 
-      // فحص وجود واجهة Electron (دعم كلا المسميين electronAPI و electron)
       const electronBridge = (window as any).electronAPI || (window as any).electron;
 
       if (typeof window !== 'undefined' && electronBridge) {
@@ -107,11 +110,10 @@ const MainContent: React.FC = () => {
             setDirectInvoice(null);
             setTimeout(() => {
               isPrintingRef.current = false;
-            }, 800); // إبقاء القفل مفعلاً لمنع ارتداد الأمر
+            }, 800);
           }
         }
       } else {
-        // في حال تشغيل المشروع من المتصفح العادي بدون Electron
         console.warn('تطبيق Electron غير متاح، فتح نافذة الطباعة الافتراضية للمتصفح.');
         window.print();
         if (isMounted) {
@@ -160,12 +162,10 @@ const MainContent: React.FC = () => {
 
   return (
     <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
-      {/* Top Header */}
       <Header 
         onOpenAuth={() => setIsGuest(false)}
       />
 
-      {/* Main Tab Navigation */}
       {!isFullComputerMode && (
         <Navigation
           activeTab={activeTab}
@@ -173,7 +173,6 @@ const MainContent: React.FC = () => {
         />
       )}
 
-      {/* Active Tab View */}
       <main className={`no-print flex-1 w-full mx-auto ${
         isMobile 
           ? 'max-w-2xl px-2.5 sm:px-4 py-3 sm:py-4' 
@@ -182,7 +181,6 @@ const MainContent: React.FC = () => {
           : 'max-w-7xl px-4 sm:px-6 lg:px-8 py-5'
       }`}>
         
-        {/* في وضع الكمبيوتر الكامل: شريط عودة سريع */}
         {isFullComputerMode && activeTab !== 'pos' && (
           <div className="bg-slate-900 text-white px-4 py-2.5 rounded-xl flex items-center justify-between mb-4 shadow-sm border border-slate-800">
             <div className="flex items-center gap-2 text-xs font-bold">
@@ -200,7 +198,6 @@ const MainContent: React.FC = () => {
           </div>
         )}
 
-        {/* في وضع الكمبيوتر الكامل: شريط أدوات علوي */}
         {isFullComputerMode && activeTab === 'pos' && (
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-white p-2 sm:px-3 rounded-xl border border-slate-200 shadow-2xs text-xs">
             <div className="flex items-center gap-2">
@@ -304,7 +301,6 @@ const MainContent: React.FC = () => {
         )}
       </main>
 
-      {/* نافذة إضافة وتعديل المواد */}
       <ProductModal
         isOpen={isProductModalOpen}
         productToEdit={productToEdit}
@@ -316,13 +312,11 @@ const MainContent: React.FC = () => {
         }}
       />
 
-      {/* نافذة المعاينة والطباعة اليدوية المعتادة */}
       <InvoicePrintModal
         invoice={invoiceToPrint}
         onClose={() => setInvoiceToPrint(null)}
       />
 
-      {/* عنصر الطباعة الصامتة المخفي الخاص بـ Electron */}
       {directInvoice && (
         <div
           id="direct-print-offscreen-container"
