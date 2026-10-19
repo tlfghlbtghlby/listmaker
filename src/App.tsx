@@ -33,7 +33,7 @@ const MainContent: React.FC = () => {
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [initialBarcodeForNewProduct, setInitialBarcodeForNewProduct] = useState<string | undefined>(undefined);
 
-  // Invoice print modal (للمعاينة اليدوية)
+  // Invoice print modal (للمعاينة والطباعة)
   const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
 
   // فاتورة الطباعة الصامتة المباشرة لتطبيق Electron
@@ -56,24 +56,27 @@ const MainContent: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
-  // معالجة إنشاء الفاتورة: إذا ضغط "حفظ فقط" لا يطبع، وإذا ضغط "حفظ وطباعة" يرسل أمراً واحداً فقط
+  // معالجة إنشاء الفاتورة: تمييز بيئة أندرويد عن بيئة ويندوز (Electron)
   const handleInvoiceCreated = (invoice: Invoice, andPrint: boolean) => {
     if (!andPrint) {
-      // تم حفظ الفاتورة بنجاح في قاعدة البيانات، ولا يتم إرسال أي أمر للطابعة
       return;
     }
 
-    if (settings.directPrintEnabled) {
+    const electronBridge = (window as any).electronAPI || (window as any).electron;
+
+    // إذا كان التطبيق يعمل داخل ويندوز وElectron ومفعل به الطباعة الصامتة
+    if (settings.directPrintEnabled && electronBridge) {
       if (isPrintingRef.current) return;
       setInvoiceToPrint(null);
       setDirectInvoice(invoice);
     } else {
+      // للأندرويد والمتصفحات: فتح نافذة الفاتورة واستدعاء نافذة طباعة النظام
       setDirectInvoice(null);
       setInvoiceToPrint(invoice);
     }
   };
 
-  // تنفيذ الطباعة الصامتة المباشرة لمرة واحدة فقط
+  // تنفيذ الطباعة المباشرة لـ Electron في ويندوز
   useEffect(() => {
     if (!directInvoice || isPrintingRef.current) return;
 
@@ -89,7 +92,6 @@ const MainContent: React.FC = () => {
 
       const paperSize = settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4');
       const pageSize = paperSize === 'a4' ? 'A4' : paperSize === 'thermal58' ? '58mm' : '80mm';
-
       const electronBridge = (window as any).electronAPI || (window as any).electron;
 
       if (typeof window !== 'undefined' && electronBridge) {
@@ -114,7 +116,7 @@ const MainContent: React.FC = () => {
           }
         }
       } else {
-        console.warn('تطبيق Electron غير متاح، فتح نافذة الطباعة الافتراضية للمتصفح.');
+        // بديل احتياطي إذا لم يتوفر كوبري إلكترون
         window.print();
         if (isMounted) {
           setDirectInvoice(null);
@@ -129,6 +131,19 @@ const MainContent: React.FC = () => {
       isMounted = false;
     };
   }, [directInvoice, settings.printerPaperSize, settings.printFormat]);
+
+  // إطلاق الطباعة التلقائية للأندرويد عند فتح الفاتورة
+  useEffect(() => {
+    if (invoiceToPrint) {
+      const isAndroid = /Android/i.test(navigator.userAgent) || !(window as any).electronAPI;
+      if (isAndroid) {
+        const timer = setTimeout(() => {
+          window.print();
+        }, 350);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [invoiceToPrint]);
 
   if (authLoading) {
     return (
