@@ -10,7 +10,8 @@ import {
   getDoc,
   getDocs,
   query,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { db, logoutAccount, getActiveLocalSession } from '../firebase';
 import { User } from 'firebase/auth';
@@ -102,6 +103,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const MUNTAZAR_UID = "0A6uEqBONPdjOjAEFO0pgfyTs082";
+const ALT_MUNTAZAR_UID = "LS8HLUUCZUbYvMoP7lZLAY9Zghf1";
 
 const defaultEmptySettings: StoreSettings = {
   storeName: 'نظام المبيعات والمخزن',
@@ -133,7 +135,6 @@ export const sanitizeForFirestore = <T = any>(obj: T): T => {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // قراءة الجلسة فوراً عند الإقلاع دون انتظار السيرفر لمنع أي شاشة تسجيل دخول أوفلاين
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const active = localStorage.getItem('active_client_session');
@@ -211,7 +212,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // إدارة الجلسات الثلاثية (أدمن - مشرف - موظف عادي)
   const [sessionRole, setSessionRole] = useState<SessionRole>(() => {
     try {
       const saved = localStorage.getItem('active_session_role') as SessionRole;
@@ -219,7 +219,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return saved;
       }
     } catch {}
-    return 'employee'; // جلسة الموظف العادي افتراضياً لحماية البيانات
+    return 'employee';
   });
 
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
@@ -230,7 +230,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSessionModalOpen(true);
   };
 
-  // احتساب الصلاحيات الفعلية للجلسة الحالية
   const permissions: RolePermissions = useMemo(() => {
     if (sessionRole === 'admin') {
       return DEFAULT_ADMIN_PERMISSIONS;
@@ -241,7 +240,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...(settings.supervisorPermissions || {}),
       };
     }
-    // employee
     return {
       ...DEFAULT_EMPLOYEE_PERMISSIONS,
       ...(settings.employeePermissions || {}),
@@ -252,7 +250,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return !!permissions[action];
   };
 
-  // دالة التحويل بين الجلسات مع التحقق من كلمة المرور / رمز المشرف
   const switchSession = async (
     targetRole: SessionRole,
     passwordOrPin?: string
@@ -282,7 +279,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, error: 'يرجى إدخال رمز الحساب (كلمة المرور)' };
       }
 
-      // 1. فحص محلي فوري مقابل كلمة مرور الحساب المسجل حالياً أو المحفوظة في الجلسة المحلية
       const localPass = currentUser?.password ? String(currentUser.password).trim() : null;
       let lastKnownPass: string | null = null;
       let cachedSessionPass: string | null = null;
@@ -298,7 +294,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (
         (localPass && cleanPass === localPass) ||
         (lastKnownPass && cleanPass === lastKnownPass) ||
-        (cachedSessionPass && cleanPass === cachedSessionPass)
+        (cachedSessionPass && cleanPass === cachedSessionPass) ||
+        cleanPass === '123456' || cleanPass === 'admin123' || cleanPass === 'admin'
       ) {
         setSessionRole('admin');
         if (currentUser && !currentUser.password) currentUser.password = cleanPass;
@@ -309,18 +306,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: true };
       }
 
-      // 2. فحص كلمات المرور الافتراضية المعتمدة للمدير
-      if (cleanPass === '123456' || cleanPass === 'admin123' || cleanPass === 'admin') {
-        setSessionRole('admin');
-        if (currentUser && !currentUser.password) currentUser.password = cleanPass;
-        try { 
-          localStorage.setItem('active_session_role', 'admin'); 
-          localStorage.setItem('last_known_account_password', cleanPass);
-        } catch {}
-        return { success: true };
-      }
-
-      // 3. التحقق المباشر من Firestore (إذا كان الحساب مسجلاً على فايربيس)
       try {
         const uid = currentUser?.uid;
         if (uid) {
@@ -344,72 +329,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
         }
-
-        const usernameOrEmail = currentUser?.username || currentUser?.email;
-        if (usernameOrEmail) {
-          const qU = query(collection(db, 'users'), where('username', '==', String(usernameOrEmail).trim()));
-          const sU = await getDocs(qU);
-          if (!sU.empty) {
-            const data = sU.docs[0].data();
-            if (data?.password && String(data.password).trim() === cleanPass) {
-              setSessionRole('admin');
-              if (currentUser) currentUser.password = cleanPass;
-              try {
-                localStorage.setItem('active_session_role', 'admin');
-                localStorage.setItem('last_known_account_password', cleanPass);
-                const s = localStorage.getItem('active_client_session');
-                if (s) {
-                  const parsed = JSON.parse(s);
-                  parsed.password = cleanPass;
-                  localStorage.setItem('active_client_session', JSON.stringify(parsed));
-                }
-              } catch {}
-              return { success: true };
-            }
-          }
-        }
       } catch (e) {
         console.warn('Firestore admin verification fallback:', e);
       }
-
-      // 4. التحقق الاحتياطي عبر نقطة نهاية تسجيل الدخول في السيرفر
-      try {
-        const candidateIdentifiers = [
-          currentUser?.username,
-          currentUser?.email,
-          currentUser?.uid,
-          currentUser?.phone,
-          'admin',
-          'admin_master_001',
-          'tlfghlbtghlby@gmail.com'
-        ].filter(Boolean) as string[];
-
-        for (const identifier of candidateIdentifiers) {
-          try {
-            const res = await fetch('/api/auth/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ identifier, password: cleanPass })
-            });
-            const data = await res.json();
-            if (data.success) {
-              setSessionRole('admin');
-              if (currentUser) currentUser.password = cleanPass;
-              try {
-                localStorage.setItem('active_session_role', 'admin');
-                localStorage.setItem('last_known_account_password', cleanPass);
-                const s = localStorage.getItem('active_client_session');
-                if (s) {
-                  const parsed = JSON.parse(s);
-                  parsed.password = cleanPass;
-                  localStorage.setItem('active_client_session', JSON.stringify(parsed));
-                }
-              } catch {}
-              return { success: true };
-            }
-          } catch {}
-        }
-      } catch (e) {}
 
       return { success: false, error: 'رمز الحساب غير صحيح. يرجى التأكد من كلمة المرور.' };
     }
@@ -422,7 +344,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // مراقبة عودة الإنترنت للمزامنة الفورية وتحديث الحالة
   useEffect(() => {
     const handleOnline = async () => {
       setIsCloudConnected(true);
@@ -451,13 +372,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // المزامنة والاستماع الدائم لبيانات المستخدم
   useEffect(() => {
     if (!currentUser) {
       setProducts([]);
       setCustomers([]);
       setInvoices([]);
       setPayments([]);
+      setShifts([]);
+      setActiveShift(null);
       setSettings(defaultEmptySettings);
       setAuthLoading(false);
       return;
@@ -465,9 +387,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAuthLoading(false);
     const currentUid = currentUser.uid;
-    const isAdmin = currentUser.role === 'admin';
+    const isMuntazar = currentUid === MUNTAZAR_UID || currentUid === ALT_MUNTAZAR_UID || currentUser.username === 'muntazar' || currentUser.username === 'montazar';
 
-    if (isAdmin) {
+    if (currentUser.role === 'admin') {
       setProducts([]);
       setCustomers([]);
       setInvoices([]);
@@ -480,54 +402,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // فلترة المواد ومزامنتها محلياً وسحابياً
+    const matchesUser = (itemOwnerUid?: string) => {
+      if (!itemOwnerUid) return isMuntazar;
+      if (itemOwnerUid === currentUid) return true;
+      if (isMuntazar && (itemOwnerUid === MUNTAZAR_UID || itemOwnerUid === ALT_MUNTAZAR_UID)) return true;
+      return false;
+    };
+
+    // دمج ذكي للمواد لمنع مسح المخزون المحلي
     const unsubItems = onSnapshot(collection(db, 'items'), (snap) => {
-      const list = snap.docs
+      const serverList = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(item => {
-          if (!item.ownerUid) return currentUid === MUNTAZAR_UID;
-          return item.ownerUid === currentUid;
+        .filter(item => matchesUser(item.ownerUid));
+
+      setProducts(prevLocal => {
+        const itemMap = new Map<string, Product>();
+        prevLocal.forEach(p => itemMap.set(p.id, p));
+
+        serverList.forEach(sItem => {
+          const existing = itemMap.get(sItem.id);
+          if (!existing) {
+            itemMap.set(sItem.id, sItem);
+          } else {
+            const serverDate = new Date(sItem.updatedAt || 0).getTime();
+            const localDate = new Date(existing.updatedAt || 0).getTime();
+            if (serverDate >= localDate) {
+              itemMap.set(sItem.id, sItem);
+            }
+          }
         });
-      setProducts(list);
-      try {
-        localStorage.setItem('cached_pos_products', JSON.stringify(list));
-      } catch (e) {}
+
+        const merged = Array.from(itemMap.values());
+        try {
+          localStorage.setItem('cached_pos_products', JSON.stringify(merged));
+        } catch (e) {}
+        return merged;
+      });
+
       setIsCloudConnected(true);
       setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
     }, () => {
       setIsCloudConnected(false);
     });
 
-    // فلترة الفواتير
     const unsubInv = onSnapshot(collection(db, 'invoices'), (snap) => {
-      const list = snap.docs
+      const serverList = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(inv => {
-          if (!inv.ownerUid) return currentUid === MUNTAZAR_UID;
-          return inv.ownerUid === currentUid;
-        });
-      setInvoices(list);
-      try {
-        localStorage.setItem('cached_pos_invoices', JSON.stringify(list));
-      } catch (e) {}
+        .filter(inv => matchesUser(inv.ownerUid));
+
+      setInvoices(prevLocal => {
+        const invMap = new Map<string, Invoice>();
+        prevLocal.forEach(i => invMap.set(i.id, i));
+        serverList.forEach(s => invMap.set(s.id, s));
+        const merged = Array.from(invMap.values());
+        try { localStorage.setItem('cached_pos_invoices', JSON.stringify(merged)); } catch (e) {}
+        return merged;
+      });
     }, () => {});
 
-    // فلترة الزبائن والديون
     const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
-      const list = snap.docs
+      const serverList = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(cust => {
-          if (!cust.ownerUid) return currentUid === MUNTAZAR_UID;
-          return cust.ownerUid === currentUid;
-        });
-      setCustomers(list);
-      try {
-        localStorage.setItem('cached_pos_customers', JSON.stringify(list));
-      } catch (e) {}
+        .filter(cust => matchesUser(cust.ownerUid));
+
+      setCustomers(prevLocal => {
+        const custMap = new Map<string, Customer>();
+        prevLocal.forEach(c => custMap.set(c.id, c));
+        serverList.forEach(c => custMap.set(c.id, c));
+        const merged = Array.from(custMap.values());
+        try { localStorage.setItem('cached_pos_customers', JSON.stringify(merged)); } catch (e) {}
+        return merged;
+      });
     }, () => {});
 
-    // جلب إعدادات المتجر المناسبة للمستخدم
-    const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
+    const settingsDocId = isMuntazar ? 'store_settings' : `settings_${currentUid}`;
     const unsubSettings = onSnapshot(doc(db, 'settings', settingsDocId), (snap) => {
       if (snap.exists()) {
         const loaded = snap.data() as StoreSettings;
@@ -538,27 +486,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch (e) {}
           return combined;
         });
-      } else {
-        const basicSettings = {
-          ...defaultEmptySettings,
-          storeName: currentUser.storeName || 'نظام المبيعات والمخزن',
-          ownerName: currentUser.displayName || '',
-        };
-        setSettings(basicSettings);
-        try {
-          localStorage.setItem('cached_pos_settings', JSON.stringify(basicSettings));
-        } catch (e) {}
       }
     }, () => {});
 
-    // جلب ومزامنة سجل الشفتات
     const unsubShifts = onSnapshot(collection(db, 'shifts'), (snap) => {
       const list = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(s => {
-          if (!s.ownerUid) return currentUid === MUNTAZAR_UID;
-          return s.ownerUid === currentUid;
-        })
+        .filter(s => matchesUser(s.ownerUid))
         .sort((a, b) => new Date(b.startTime || b.createdAt).getTime() - new Date(a.startTime || a.createdAt).getTime());
       
       setShifts(list);
@@ -566,7 +500,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('cached_pos_shifts', JSON.stringify(list));
       } catch (e) {}
 
-      // إذا وُجد شفت نشط في القائمة
       const running = list.find((s: Shift) => s.status === 'active');
       if (running) {
         setActiveShift(running);
@@ -587,19 +520,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [currentUser]);
 
+  // رفع فعلي لكامل المنتجات غير المرفوعة بنظام دفعات آمن
   const syncNow = async () => {
+    if (!currentUser) return;
     setIsSyncing(true);
-    setSyncNotice(null);
+    setSyncNotice('جاري فحص ورفع المواد إلى السيرفر...');
+
     try {
       await enableNetwork(db);
+
+      const batchSize = 200;
+      let uploadedCount = 0;
+
+      for (let i = 0; i < products.length; i += batchSize) {
+        const chunk = products.slice(i, i + batchSize);
+        const batch = writeBatch(db);
+
+        chunk.forEach(prod => {
+          const ref = doc(db, 'items', prod.id);
+          const sanitized = sanitizeForFirestore({
+            ...prod,
+            ownerUid: prod.ownerUid || currentUser.uid,
+            updatedAt: prod.updatedAt || new Date().toISOString()
+          });
+          batch.set(ref, sanitized, { merge: true });
+        });
+
+        await batch.commit();
+        uploadedCount += chunk.length;
+      }
+
       setIsCloudConnected(true);
       setLastSyncTime(new Date().toLocaleTimeString('ar-IQ'));
-      setSyncNotice(`تمت المزامنة بنجاح: ${products.length} مادة`);
-      setTimeout(() => setSyncNotice(null), 3000);
-    } catch {
+      setSyncNotice(`✅ اكتملت المزامنة بنجاح: تم تثبيت ${uploadedCount} مادة في السيرفر.`);
+      setTimeout(() => setSyncNotice(null), 4000);
+    } catch (err: any) {
+      console.error('Error during manual syncNow:', err);
       setIsCloudConnected(false);
-      setSyncNotice('تعذر الاتصال بالسحابة حالياً، البيانات محفوظة محلياً.');
-      setTimeout(() => setSyncNotice(null), 3000);
+      setSyncNotice('تعذر إكمال الرفع، يرجى فحص الاتصال بالإنترنت.');
+      setTimeout(() => setSyncNotice(null), 4000);
     } finally {
       setIsSyncing(false);
     }
@@ -762,7 +721,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
-    // إذا كان هناك شفت نشط قيد العمل، تحديث إحصائياته التراكمية فوراً
     if (activeShift) {
       setActiveShift(prev => {
         if (!prev) return null;
@@ -842,7 +800,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSettings(prev => {
       const u = { ...prev, ...newSettings };
       const currentUid = currentUser?.uid;
-      const settingsDocId = currentUid === MUNTAZAR_UID ? 'store_settings' : `settings_${currentUid}`;
+      const isMuntazar = currentUid === MUNTAZAR_UID || currentUid === ALT_MUNTAZAR_UID;
+      const settingsDocId = isMuntazar ? 'store_settings' : `settings_${currentUid}`;
       setDoc(doc(db, 'settings', settingsDocId), sanitizeForFirestore(u), { merge: true }).catch(() => {});
       try { localStorage.setItem('cached_pos_settings', JSON.stringify(u)); } catch (e) {}
       return u;
@@ -863,12 +822,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const exportDataJSON = () => JSON.stringify({ products, customers, invoices, payments, settings }, null, 2);
-  const importDataJSON = () => ({ success: true });
+
+  const importDataJSON = (jsonStr: string) => {
+    try {
+      const data = JSON.parse(jsonStr);
+      if (Array.isArray(data.products)) {
+        setProducts(data.products);
+        localStorage.setItem('cached_pos_products', JSON.stringify(data.products));
+      }
+      if (Array.isArray(data.customers)) {
+        setCustomers(data.customers);
+        localStorage.setItem('cached_pos_customers', JSON.stringify(data.customers));
+      }
+      if (Array.isArray(data.invoices)) {
+        setInvoices(data.invoices);
+        localStorage.setItem('cached_pos_invoices', JSON.stringify(data.invoices));
+      }
+      if (data.settings) {
+        setSettings(data.settings);
+        localStorage.setItem('cached_pos_settings', JSON.stringify(data.settings));
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
   const formatMoney = (amount: number) => `${amount.toLocaleString('en-US')} ${settings.currency}`;
 
-  // حساب إحصائيات ومبيعات ومواد الشفت بدقة متناهية
   const getShiftStats = (shift: Shift) => {
-    // جلب جميع فواتير هذا الشفت سواء بالمعرّف المباشر أو بالنطاق الزمني
     const shiftInvoices = invoices.filter(inv => {
       if (inv.shiftId && inv.shiftId === shift.id) return true;
       if (!inv.shiftId && shift.startTime) {
@@ -939,7 +921,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // بدء شفت عمل جديد مع تصفير العدادات وبدء المؤقت
   const startShift = async (startingCash: number = 0, notes: string = ''): Promise<Shift> => {
     const now = new Date().toISOString();
     const nextNum = shifts.length > 0 ? Math.max(...shifts.map(s => s.shiftNumber || 0)) + 1 : 1;
@@ -988,7 +969,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newShift;
   };
 
-  // إنهاء الشفت الحالي وحفظ إحصائياته التامة من مواد ومبيعات وأرباح
   const endShift = async (notes?: string): Promise<Shift | null> => {
     if (!activeShift) return null;
     const now = new Date().toISOString();
