@@ -23,7 +23,7 @@ interface InvoicesViewProps {
 }
 
 export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => {
-  const { invoices, deleteInvoice, returnInvoice, formatMoney } = useApp();
+  const { invoices, deleteInvoice, returnInvoice, formatMoney, hasPermission } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'direct' | 'credit' | 'unpaid' | 'returned'>('all');
@@ -123,19 +123,23 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">المبالغ الآجلة (ديون في القوائم)</div>
-          <div className="text-2xl font-black text-amber-600">
-            {formatMoney(totalRemainingCredit)}
+        {hasPermission('canViewCustomers') && (
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">المبالغ الآجلة (ديون في القوائم)</div>
+            <div className="text-2xl font-black text-amber-600">
+              {formatMoney(totalRemainingCredit)}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">إجمالي الأرباح المحققة</div>
-          <div className="text-2xl font-black text-blue-700">
-            {formatMoney(totalProfits)}
+        {hasPermission('canViewReports') && (
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">إجمالي الأرباح المحققة</div>
+            <div className="text-2xl font-black text-blue-700">
+              {formatMoney(totalProfits)}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
 
@@ -244,14 +248,16 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                 <th className="py-3 px-4 text-slate-900">المبلغ الإجمالي</th>
                 <th className="py-3 px-4 text-emerald-800">المسدد نقداً</th>
                 <th className="py-3 px-4 text-amber-800">المتبقي (آجل)</th>
-                <th className="py-3 px-4 text-blue-900">ربح القائمة</th>
+                {hasPermission('canViewReports') && (
+                  <th className="py-3 px-4 text-blue-900">ربح القائمة</th>
+                )}
                 <th className="py-3 px-4 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={hasPermission('canViewReports') ? 10 : 9} className="py-12 text-center text-slate-400">
                     <FileText className="w-10 h-10 mx-auto mb-2 text-slate-300" />
                     <p className="font-semibold text-slate-600">لا توجد قوائم مطابقة</p>
                     <p className="text-xs text-slate-400 mt-1">ابدأ بإنشاء قائمة جديدة من شاشة نقطة البيع</p>
@@ -340,9 +346,11 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                       </td>
 
                       {/* Net Profit */}
-                      <td className="py-3 px-4 text-xs font-bold text-blue-700">
-                        +{formatMoney(inv.netProfit)}
-                      </td>
+                      {hasPermission('canViewReports') && (
+                        <td className="py-3 px-4 text-xs font-bold text-blue-700">
+                          +{formatMoney(inv.netProfit)}
+                        </td>
+                      )}
 
                       {/* Actions */}
                       <td className="py-3 px-4 text-center">
@@ -355,32 +363,37 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                             <Printer className="w-4 h-4" />
                           </button>
 
-                          {/* زر إرجاع المشتريات / القائمة */}
-                          {inv.status !== 'returned' ? (
-                            <button
-                              disabled={returningId === inv.id}
-                              onClick={() => handleReturn(inv)}
-                              className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 transition flex items-center gap-1"
-                              title="إرجاع القائمة واسترداد المواد للمخزن (في حال تخلى الزبون عن الشراء)"
-                            >
-                              <RotateCcw className={`w-4 h-4 ${returningId === inv.id ? 'animate-spin' : ''}`} />
-                            </button>
-                          ) : (
-                            <span 
-                              className="p-1.5 text-slate-300 cursor-not-allowed" 
-                              title="تم إرجاع هذه القائمة والمواد مستردة"
-                            >
-                              <RotateCcw className="w-4 h-4" />
-                            </span>
+                          {/* زر إرجاع المشتريات / القائمة (للمصرح لهم فقط) */}
+                          {hasPermission('canReturnInvoice') && (
+                            inv.status !== 'returned' ? (
+                              <button
+                                disabled={returningId === inv.id}
+                                onClick={() => handleReturn(inv)}
+                                className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 transition flex items-center gap-1"
+                                title="إرجاع القائمة واسترداد المواد للمخزن (في حال تخلى الزبون عن الشراء)"
+                              >
+                                <RotateCcw className={`w-4 h-4 ${returningId === inv.id ? 'animate-spin' : ''}`} />
+                              </button>
+                            ) : (
+                              <span 
+                                className="p-1.5 text-slate-300 cursor-not-allowed" 
+                                title="تم إرجاع هذه القائمة والمواد مستردة"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </span>
+                            )
                           )}
 
-                          <button
-                            onClick={() => handleDelete(inv)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                            title="إلغاء وحذف القائمة نهائياً"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {/* زر حذف القائمة (للأدمن فقط) */}
+                          {hasPermission('canDeleteInvoice') && (
+                            <button
+                              onClick={() => handleDelete(inv)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                              title="إلغاء وحذف القائمة نهائياً"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
 

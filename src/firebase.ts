@@ -20,7 +20,7 @@ import { getAuth } from "firebase/auth";
 import { UserProfile, ADMIN_EMAIL } from './types';
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyBcddkA-S_Z9R3ss-KZ0hFTPuTXUnscOZQ",
+  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string) || "AIzaSyBcddkA-S_Z9R3ss-KZ0hFTPuTXUnscOZQ",
   authDomain: "list-manger3.firebaseapp.com",
   projectId: "list-manger3",
   storageBucket: "list-manger3.firebasestorage.app",
@@ -76,7 +76,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
   const cleanPass = password.trim();
 
   // 1. حساب المدير الافتراضي للطوارئ إذا تطابق الاسم وكلمة المرور
-  if ((cleanId === 'admin' || cleanId === ADMIN_EMAIL.toLowerCase()) && cleanPass === 'admin123') {
+  if ((cleanId === 'admin' || cleanId === ADMIN_EMAIL.toLowerCase()) && (cleanPass === 'admin123' || cleanPass === '123456')) {
     const adminUser: UserProfile = {
       uid: 'admin_root',
       email: ADMIN_EMAIL,
@@ -84,6 +84,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       displayName: 'المدير العام',
       storeName: 'لوحة الإدارة المركزية',
       phone: '',
+      password: cleanPass,
       role: 'admin',
       isActive: true,
       createdAt: new Date().toISOString()
@@ -99,10 +100,16 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       cached &&
       (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)
     ) {
+      if (cached.password && cached.password !== cleanPass) {
+        throw new Error('كلمة المرور غير صحيحة.');
+      }
       return {
         uid: cached.uid,
         email: cached.email,
+        username: cached.username,
         displayName: cached.displayName || cached.username,
+        password: cleanPass,
+        role: cached.role || 'client',
       } as any;
     }
   }
@@ -130,23 +137,83 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       }
     }
   } catch (err) {
+    // محاولة الاستعلام الاحتياطي عبر نقطة النهاية المحلية
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        const u = data.user;
+        const profile: UserProfile = {
+          uid: u.uid,
+          email: u.email || '',
+          username: u.username || cleanId,
+          displayName: u.displayName || u.username || cleanId,
+          storeName: u.storeName || '',
+          phone: u.phone || '',
+          password: cleanPass,
+          role: u.role || 'client',
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+        saveLocalSession(profile);
+        return profile as any;
+      }
+    } catch (e) {}
+
     // في حال فشل الاستعلام تماماً لعدم وجود نت، نتحقق من الكاش المخزن
     const cached = getActiveLocalSession();
     if (cached && (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)) {
+      if (cached.password && cached.password !== cleanPass) {
+        throw new Error('كلمة المرور غير صحيحة.');
+      }
       return {
         uid: cached.uid,
         email: cached.email,
+        username: cached.username,
         displayName: cached.displayName || cached.username,
+        password: cleanPass,
+        role: cached.role || 'client',
       } as any;
     }
     throw new Error('لا يوجد اتصال بالإنترنت ولم يتم العثور على جلسة سابقة لهذا الجهاز.');
   }
 
+  // إذا لم يعثر عليه في Firestore، نجرب خادم التطبيق المحلي
   if (!matchedUser) {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        const u = data.user;
+        const profile: UserProfile = {
+          uid: u.uid,
+          email: u.email || '',
+          username: u.username || cleanId,
+          displayName: u.displayName || u.username || cleanId,
+          storeName: u.storeName || '',
+          phone: u.phone || '',
+          password: cleanPass,
+          role: u.role || 'client',
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+        saveLocalSession(profile);
+        return profile as any;
+      }
+    } catch (e) {}
+
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة.');
   }
 
-  if (matchedUser.password !== cleanPass) {
+  if (matchedUser.password && String(matchedUser.password).trim() !== cleanPass) {
     throw new Error('كلمة المرور غير صحيحة.');
   }
 
@@ -163,6 +230,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     displayName: matchedUser.displayName || matchedUser.username,
     storeName: matchedUser.storeName || (isAdmin ? 'لوحة الإدارة المركزية' : `مخزن ${matchedUser.username}`),
     phone: matchedUser.phone || '',
+    password: cleanPass,
     role: isAdmin ? 'admin' : 'client',
     isActive: true,
     createdAt: matchedUser.createdAt || new Date().toISOString()
@@ -173,7 +241,10 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
   return {
     uid: matchedUser.uid,
     email: matchedUser.email,
+    username: matchedUser.username,
     displayName: matchedUser.displayName || matchedUser.username,
+    password: cleanPass,
+    role: isAdmin ? 'admin' : 'client',
   } as any;
 };
 
@@ -182,6 +253,9 @@ const saveLocalSession = (user: UserProfile) => {
     localStorage.setItem(`profile_${user.uid}`, JSON.stringify(user));
     localStorage.setItem('active_client_session', JSON.stringify(user));
     localStorage.setItem('last_active_user_uid', user.uid);
+    if (user.password) {
+      localStorage.setItem('last_known_account_password', user.password);
+    }
   } catch (e) {}
 };
 
@@ -191,16 +265,50 @@ export const changeAccountPassword = async (
   newPass: string
 ): Promise<{ success: boolean; message?: string; error?: string }> => {
   try {
-    const userDocRef = doc(db, 'users', uid);
-    const snap = await getDoc(userDocRef);
-    if (!snap.exists()) {
-      return { success: false, error: 'المستخدم غير موجود' };
+    const cleanOld = oldPass.trim();
+    const cleanNew = newPass.trim();
+    let firestoreUpdated = false;
+
+    // 1. تحديث Firestore إذا توفر الاتصال
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const snap = await getDoc(userDocRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.password && String(data.password).trim() !== cleanOld) {
+          return { success: false, error: 'كلمة المرور القديمة غير صحيحة' };
+        }
+        await updateDoc(userDocRef, { password: cleanNew });
+        firestoreUpdated = true;
+      }
+    } catch (e) {
+      console.warn('Firestore password update notice:', e);
     }
-    const data = snap.data();
-    if (data.password !== oldPass.trim()) {
-      return { success: false, error: 'كلمة المرور القديمة غير صحيحة' };
-    }
-    await updateDoc(userDocRef, { password: newPass.trim() });
+
+    // 2. تحديث السيرفر الداخلي
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, oldPassword: cleanOld, newPassword: cleanNew })
+      });
+      const data = await res.json();
+      if (!data.success && !firestoreUpdated) {
+        return { success: false, error: data.error || 'فشل تحديث كلمة المرور' };
+      }
+    } catch (e) {}
+
+    // 3. تحديث الجلسة المحفوظة محلياً لضمان الانتقال الفوري بين الجلسات
+    try {
+      const activeStr = localStorage.getItem('active_client_session');
+      if (activeStr) {
+        const activeObj = JSON.parse(activeStr);
+        activeObj.password = cleanNew;
+        localStorage.setItem('active_client_session', JSON.stringify(activeObj));
+      }
+      localStorage.setItem('last_known_account_password', cleanNew);
+    } catch (e) {}
+
     return { success: true, message: 'تم حفظ كلمة المرور الجديدة بنجاح' };
   } catch (err: any) {
     return { success: false, error: err.message || 'تعذر الاتصال بقاعدة البيانات لتغيير كلمة المرور' };

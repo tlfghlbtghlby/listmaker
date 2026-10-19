@@ -9,13 +9,44 @@ import {
   Users, 
   ArrowUpRight, 
   Calendar,
-  Award
+  Award,
+  Lock
 } from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
-  const { products, invoices, customers, payments, formatMoney, settings } = useApp();
+  const { 
+    products, 
+    invoices, 
+    customers, 
+    payments, 
+    formatMoney, 
+    settings,
+    hasPermission,
+    openSessionModal
+  } = useApp();
 
   const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
+
+  if (!hasPermission('canViewReports')) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center max-w-md mx-auto my-12 space-y-4 shadow-sm" dir="rtl">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-base font-extrabold text-slate-900">سجل الأرباح والتقارير المالية مقفل</h3>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          يتطلب الاطلاع على هوامش الأرباح والتقارير المالية الدخول بجلسة الأدمن (المدير العام) باستخدام كلمة المرور.
+        </p>
+        <button
+          type="button"
+          onClick={() => openSessionModal('admin')}
+          className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
+        >
+          التحويل لجلسة الأدمن
+        </button>
+      </div>
+    );
+  }
 
   // Filter invoices by time
   const filteredInvoices = useMemo(() => {

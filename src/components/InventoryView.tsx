@@ -32,7 +32,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onEditProduct,
   onOpenQuickAdd,
 }) => {
-  const { products, deleteProduct, adjustStock, formatMoney, settings } = useApp();
+  const { products, deleteProduct, adjustStock, formatMoney, settings, sessionRole } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -87,7 +87,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const totalCostValuation = products.reduce((sum, p) => sum + p.costPrice * p.stock, 0);
   const totalRetailValuation = products.reduce((sum, p) => sum + p.retailPrice * p.stock, 0);
   const expectedProfitValuation = totalRetailValuation - totalCostValuation;
-  const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
+  const lowStockCount = products.filter((p) => p.stock <= p.minStock && p.stock > 0).length;
+  const outOfStockCount = products.filter((p) => p.stock <= 0).length;
 
   const handleDelete = (prod: Product) => {
     if (confirm(`هل أنت متأكد من حذف المادة (${prod.name}) من المخزن؟`)) {
@@ -124,41 +125,75 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     <div className="space-y-6">
       
       {/* Top Valuation Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">إجمالي أنواع المواد بالمخزن</div>
-          <div className="text-2xl font-black text-slate-900 flex items-center justify-between">
-            <span>{products.length} صنف</span>
-            <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-              {totalItemsCount} قطعة/وحدة
-            </span>
+      {sessionRole === 'admin' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">إجمالي أنواع المواد بالمخزن</div>
+            <div className="text-2xl font-black text-slate-900 flex items-center justify-between">
+              <span>{products.length} صنف</span>
+              <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                {totalItemsCount} قطعة/وحدة
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">قيمة المخزون بسعر الجملة (التكلفة)</div>
+            <div className="text-2xl font-black text-slate-900">
+              {formatMoney(totalCostValuation)}
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">قيمة المخزون بسعر البيع (المتوقع)</div>
+            <div className="text-2xl font-black text-emerald-700">
+              {formatMoney(totalRetailValuation)}
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">الربح الصافي المتوقع عند تصريف المخزون</div>
+            <div className="text-2xl font-black text-blue-700 flex items-center gap-1.5">
+              <TrendingUp className="w-5 h-5 text-blue-500" />
+              <span>{formatMoney(expectedProfitValuation)}</span>
+            </div>
+          </div>
+
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">إجمالي المواد المتوفرة بالمخزن</div>
+            <div className="text-2xl font-black text-slate-900 flex items-center justify-between">
+              <span>{products.length} صنف</span>
+              <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                {totalItemsCount} قطعة
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">المواد التي قاربت على النفاد</div>
+            <div className="text-2xl font-black text-amber-600 flex items-center justify-between">
+              <span>{lowStockCount} مادة</span>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                تحت حد الطلب
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs text-slate-500 mb-1">المواد المنتهية الرصيد</div>
+            <div className="text-2xl font-black text-rose-600 flex items-center justify-between">
+              <span>{outOfStockCount} صنف</span>
+              <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                رصيدها صفر
+              </span>
+            </div>
           </div>
         </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">قيمة المخزون بسعر الجملة (التكلفة)</div>
-          <div className="text-2xl font-black text-slate-900">
-            {formatMoney(totalCostValuation)}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">قيمة المخزون بسعر البيع (المتوقع)</div>
-          <div className="text-2xl font-black text-emerald-700">
-            {formatMoney(totalRetailValuation)}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="text-xs text-slate-500 mb-1">الربح الصافي المتوقع عند تصريف المخزون</div>
-          <div className="text-2xl font-black text-blue-700 flex items-center gap-1.5">
-            <TrendingUp className="w-5 h-5 text-blue-500" />
-            <span>{formatMoney(expectedProfitValuation)}</span>
-          </div>
-        </div>
-
-      </div>
+      )}
 
       {/* Control Bar: Search, Filters, Add Button */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
@@ -448,13 +483,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleDelete(prod)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                            title="حذف المادة"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {sessionRole === 'admin' && (
+                            <button
+                              onClick={() => handleDelete(prod)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                              title="حذف المادة من المخزن (خاص بالأدمن)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
 

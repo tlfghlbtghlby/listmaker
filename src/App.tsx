@@ -8,8 +8,13 @@ import { InvoicesView } from './components/InvoicesView';
 import { CustomersView } from './components/CustomersView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
+import { ShiftsView } from './components/ShiftsView';
 import { ProductModal } from './components/ProductModal';
 import { InvoicePrintModal } from './components/InvoicePrintModal';
+import { SessionSwitchModal } from './components/SessionSwitchModal';
+import { StartShiftModal } from './components/StartShiftModal';
+import { EndShiftModal } from './components/EndShiftModal';
+import { ShiftDetailsModal } from './components/ShiftDetailsModal';
 import { AuthView } from './components/AuthView';
 import { Product, Invoice } from './types';
 import { 
@@ -18,13 +23,42 @@ import {
   Users, 
   BarChart3, 
   Settings, 
-  ArrowRight
+  ArrowRight,
+  Clock
 } from 'lucide-react';
 
 const MainContent: React.FC = () => {
-  const { settings, currentUser, authLoading } = useApp();
+  const { 
+    settings, 
+    currentUser, 
+    authLoading, 
+    sessionRole, 
+    hasPermission, 
+    activeShift,
+    selectedShiftForDetails,
+    setSelectedShiftForDetails
+  } = useApp();
   const [isGuest, setIsGuest] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('pos');
+
+  // إعادة التوجيه لشاشة المبيعات إذا تحولت الجلسة لقسم غير مصرح به
+  useEffect(() => {
+    const isTabPermitted = () => {
+      switch (activeTab) {
+        case 'pos': return hasPermission('canSell');
+        case 'inventory': return hasPermission('canAccessInventory');
+        case 'invoices': return hasPermission('canViewInvoices');
+        case 'customers': return hasPermission('canViewCustomers');
+        case 'reports': return hasPermission('canViewReports');
+        case 'shifts': return hasPermission('canAccessShifts');
+        case 'settings': return hasPermission('canAccessSettings');
+        default: return true;
+      }
+    };
+    if (!isTabPermitted()) {
+      setActiveTab('pos');
+    }
+  }, [sessionRole, activeTab, hasPermission]);
   const isMobile = settings.deviceMode === 'mobile';
   const isFullComputerMode = !isMobile && (settings.desktopLayout === 'full');
   
@@ -43,7 +77,7 @@ const MainContent: React.FC = () => {
   const isPrintingRef = useRef(false);
 
   // Settings initial tab
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'all'>('store');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'store' | 'quick-add' | 'pricing' | 'security' | 'sessions' | 'all'>('store');
 
   const handleOpenNewProduct = (initialBarcode?: string) => {
     setProductToEdit(null);
@@ -153,6 +187,7 @@ const MainContent: React.FC = () => {
     switch (activeTab) {
       case 'inventory': return 'جدول المخزون الكامل';
       case 'invoices': return 'سجل الفواتير والقوائم';
+      case 'shifts': return 'إدارة وسجل الشفتات والورديات';
       case 'customers': return 'حسابات الديون والعملاء';
       case 'reports': return 'الأرباح والتقارير المالية';
       case 'settings': return 'الإعدادات العامة والنسخ الاحتياطي';
@@ -229,6 +264,20 @@ const MainContent: React.FC = () => {
                 <FileText className="w-3.5 h-3.5 text-slate-500" />
                 <span>سجل الفواتير</span>
               </button>
+              {hasPermission('canAccessShifts') && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('shifts')}
+                  className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
+                  title="عرض سجل الشفتات وساعات العمل"
+                >
+                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>الشفتات</span>
+                  {activeShift && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setActiveTab('customers')}
@@ -286,6 +335,12 @@ const MainContent: React.FC = () => {
           />
         )}
 
+        {activeTab === 'shifts' && (
+          <ShiftsView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
         {activeTab === 'customers' && (
           <CustomersView
             onViewInvoice={(inv) => setInvoiceToPrint(inv)}
@@ -315,6 +370,18 @@ const MainContent: React.FC = () => {
       <InvoicePrintModal
         invoice={invoiceToPrint}
         onClose={() => setInvoiceToPrint(null)}
+      />
+
+      <SessionSwitchModal />
+
+      <StartShiftModal />
+
+      <EndShiftModal onNavigateToShifts={() => setActiveTab('shifts')} />
+
+      <ShiftDetailsModal
+        shift={selectedShiftForDetails}
+        onClose={() => setSelectedShiftForDetails(null)}
+        onViewInvoice={(inv) => setInvoiceToPrint(inv)}
       />
 
       {directInvoice && (

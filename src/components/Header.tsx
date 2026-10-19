@@ -15,8 +15,11 @@ import {
   LogIn,
   Store,
   RefreshCw,
-  CheckCircle2
+  CheckCircle2,
+  Lock
 } from 'lucide-react';
+import { SessionBadgeButton } from './SessionBadgeButton';
+import { ShiftHeaderButton } from './ShiftHeaderButton';
 
 interface HeaderProps {
   onOpenSettings?: () => void;
@@ -38,7 +41,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
     isSyncing,
     lastSyncTime,
     syncNotice,
-    setSyncNotice
+    setSyncNotice,
+    hasPermission,
+    sessionRole
   } = useApp();
 
   // Metrics calculations
@@ -155,6 +160,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
               )}
             </button>
 
+            {/* Session Switch Button (زر التبديل بين جلسات النظام) */}
+            <SessionBadgeButton />
+
+            {/* Shift Start/End Live Button (زر بدء وإنهاء الشفت والمؤقت الحي) */}
+            <ShiftHeaderButton />
+
             {/* Device Mode Toggle */}
             <button
               type="button"
@@ -259,27 +270,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
             </div>
           </div>
 
-          {/* Today Profit */}
-          <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg px-3 py-1.5 flex items-center gap-2.5 shrink-0 whitespace-nowrap">
-            <div className="w-6 h-6 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center">
-              <TrendingUp className="w-3.5 h-3.5" />
+          {/* Today Profit (للأدمن والمصرح لهم فقط) */}
+          {hasPermission('canViewReports') && (
+            <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg px-3 py-1.5 flex items-center gap-2.5 shrink-0 whitespace-nowrap">
+              <div className="w-6 h-6 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                <TrendingUp className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] block">أرباح اليوم الصافية</span>
+                <span className="font-bold text-emerald-400 text-xs">{formatMoney(todayProfitTotal)}</span>
+              </div>
             </div>
-            <div>
-              <span className="text-slate-400 text-[10px] block">أرباح اليوم الصافية</span>
-              <span className="font-bold text-emerald-400 text-xs">{formatMoney(todayProfitTotal)}</span>
-            </div>
-          </div>
+          )}
 
-          {/* Total Market Debt */}
-          <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg px-3 py-1.5 flex items-center gap-2.5 shrink-0 whitespace-nowrap">
-            <div className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <CreditCard className="w-3.5 h-3.5" />
+          {/* Total Market Debt (للأدمن والمشرف) */}
+          {hasPermission('canViewCustomers') && (
+            <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg px-3 py-1.5 flex items-center gap-2.5 shrink-0 whitespace-nowrap">
+              <div className="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                <CreditCard className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] block">ديون السوق (البيع الآجل)</span>
+                <span className="font-bold text-amber-300 text-xs">{formatMoney(totalMarketDebt)}</span>
+              </div>
             </div>
-            <div>
-              <span className="text-slate-400 text-[10px] block">ديون السوق (البيع الآجل)</span>
-              <span className="font-bold text-amber-300 text-xs">{formatMoney(totalMarketDebt)}</span>
-            </div>
-          </div>
+          )}
 
           {/* Low Stock Warning */}
           {lowStockCount > 0 && (

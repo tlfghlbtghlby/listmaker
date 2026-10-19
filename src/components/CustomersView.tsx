@@ -15,7 +15,8 @@ import {
   CheckCircle, 
   AlertCircle,
   X,
-  Printer
+  Printer,
+  Lock
 } from 'lucide-react';
 
 interface CustomersViewProps {
@@ -31,7 +32,9 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
     updateCustomer, 
     recordPayment, 
     formatMoney,
-    settings 
+    settings,
+    hasPermission,
+    openSessionModal
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,6 +50,27 @@ export const CustomersView: React.FC<CustomersViewProps> = ({ onViewInvoice }) =
   const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [recentReceipt, setRecentReceipt] = useState<PaymentRecord | null>(null);
+
+  if (!hasPermission('canViewCustomers')) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center max-w-md mx-auto my-12 space-y-4 shadow-sm" dir="rtl">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-base font-extrabold text-slate-900">سجل الديون والعملاء مقفل</h3>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          يتطلب الدخول لسجل حسابات الديون والزبائن تفعيل جلسة الأدمن أو المشرف لحماية خصوصية الحسابات المالية.
+        </p>
+        <button
+          type="button"
+          onClick={() => openSessionModal('admin')}
+          className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
+        >
+          التحويل لجلسة الأدمن
+        </button>
+      </div>
+    );
+  }
 
   // Add Customer modal state
   const [newCustName, setNewCustName] = useState('');

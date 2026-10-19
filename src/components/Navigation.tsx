@@ -5,11 +5,12 @@ import {
   FileText, 
   Users, 
   BarChart3, 
-  Settings 
+  Settings,
+  Clock
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-export type TabType = 'pos' | 'inventory' | 'invoices' | 'customers' | 'reports' | 'settings';
+export type TabType = 'pos' | 'inventory' | 'invoices' | 'customers' | 'reports' | 'shifts' | 'settings';
 
 interface NavigationProps {
   activeTab: TabType;
@@ -17,16 +18,17 @@ interface NavigationProps {
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }) => {
-  const { products, invoices, customers } = useApp();
+  const { products, invoices, customers, shifts, activeShift, hasPermission } = useApp();
 
   const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
   const activeDebtCustomers = customers.filter((c) => c.totalDebt > 0).length;
 
-  const navItems: { id: TabType; label: string; icon: React.ReactNode; badge?: number | string; badgeColor?: string }[] = [
+  const allNavItems: { id: TabType; label: string; icon: React.ReactNode; badge?: number | string; badgeColor?: string; permitted: boolean }[] = [
     {
       id: 'pos',
       label: 'نقطة البيع وقائمة جديدة',
       icon: <ShoppingCart className="w-4 h-4" />,
+      permitted: hasPermission('canSell'),
     },
     {
       id: 'inventory',
@@ -34,6 +36,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
       icon: <Boxes className="w-4 h-4" />,
       badge: lowStockCount > 0 ? `${lowStockCount} ناقص` : undefined,
       badgeColor: 'text-rose-600 bg-rose-50',
+      permitted: hasPermission('canAccessInventory'),
     },
     {
       id: 'invoices',
@@ -41,6 +44,15 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
       icon: <FileText className="w-4 h-4" />,
       badge: invoices.length,
       badgeColor: 'text-slate-600 bg-slate-100',
+      permitted: hasPermission('canViewInvoices'),
+    },
+    {
+      id: 'shifts',
+      label: 'الشفتات والورديات',
+      icon: <Clock className="w-4 h-4" />,
+      badge: activeShift ? '🟢 شفت جارٍ' : (shifts.length > 0 ? shifts.length : undefined),
+      badgeColor: activeShift ? 'text-emerald-700 bg-emerald-100 animate-pulse font-bold' : 'text-slate-600 bg-slate-100',
+      permitted: hasPermission('canAccessShifts'),
     },
     {
       id: 'customers',
@@ -48,18 +60,23 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
       icon: <Users className="w-4 h-4" />,
       badge: activeDebtCustomers > 0 ? `${activeDebtCustomers} مدين` : undefined,
       badgeColor: 'text-amber-700 bg-amber-50',
+      permitted: hasPermission('canViewCustomers'),
     },
     {
       id: 'reports',
       label: 'الأرباح والتقارير المالية',
       icon: <BarChart3 className="w-4 h-4" />,
+      permitted: hasPermission('canViewReports'),
     },
     {
       id: 'settings',
       label: 'الإعدادات والنسخ الاحتياطي',
       icon: <Settings className="w-4 h-4" />,
+      permitted: hasPermission('canAccessSettings'),
     },
   ];
+
+  const navItems = allNavItems.filter((item) => item.permitted);
 
   return (
     <nav className="no-print bg-white border-b border-slate-200 sticky top-0 z-20 shadow-xs">

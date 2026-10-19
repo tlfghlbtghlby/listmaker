@@ -26,9 +26,12 @@ import {
   Box,
   Save,
   X,
-  Package
+  Package,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { SessionBadgeButton } from './SessionBadgeButton';
 
 interface POSViewProps {
   onInvoiceCreated: (invoice: Invoice, andPrint: boolean) => void;
@@ -71,7 +74,18 @@ const playScannerBeep = (type: 'success' | 'alert' = 'success') => {
 };
 
 export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewProduct, onEditProduct, onOpenSettings }) => {
-  const { products, customers, createInvoice, updateSettings, formatMoney, settings, addCustomer, updateProduct } = useApp();
+  const { 
+    products, 
+    customers, 
+    createInvoice, 
+    updateSettings, 
+    formatMoney, 
+    settings, 
+    addCustomer, 
+    updateProduct,
+    sessionRole,
+    hasPermission
+  } = useApp();
 
   // POS State
   const [saleType, setSaleType] = useState<SaleType>('direct');
@@ -148,6 +162,66 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setScanNotice(`تم تحديث أسعار مادة "${productForPriceEdit.name}" بنجاح`);
     setTimeout(() => setScanNotice(null), 3000);
     setProductForPriceEdit(null);
+  };
+
+  // Cart Item Price Edit State (تعديل السعر في هذه القائمة فقط للزبون دون تغيير أسعار المخزن)
+  const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
+  const [tempItemPrice, setTempItemPrice] = useState<string>('');
+
+  const handleToggleEditCartItemPrice = (item: InvoiceItem) => {
+    if (editingPriceProductId === item.productId) {
+      setEditingPriceProductId(null);
+      setTempItemPrice('');
+    } else {
+      setEditingPriceProductId(item.productId);
+      setTempItemPrice(String(item.unitPrice));
+    }
+  };
+
+  const handleSaveCartItemPrice = (productId: string) => {
+    const parsed = parseFloat(tempItemPrice);
+    if (isNaN(parsed) || parsed < 0) {
+      return;
+    }
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.productId === productId) {
+          return {
+            ...item,
+            unitPrice: parsed,
+            total: item.quantity * parsed,
+            isCustomPrice: true,
+          };
+        }
+        return item;
+      })
+    );
+    setEditingPriceProductId(null);
+    setTempItemPrice('');
+  };
+
+  const handleResetCartItemPrice = (productId: string) => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return;
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.productId === productId) {
+          const cartonCap = item.piecesPerCarton || prod.piecesPerCarton || 1;
+          const isCarton = item.unitType === 'carton';
+          const basePiece = item.priceType === 'wholesale' ? prod.wholesalePrice : prod.retailPrice;
+          const defaultUnitPrice = isCarton ? basePiece * cartonCap : basePiece;
+          return {
+            ...item,
+            unitPrice: defaultUnitPrice,
+            total: item.quantity * defaultUnitPrice,
+            isCustomPrice: false,
+          };
+        }
+        return item;
+      })
+    );
+    setEditingPriceProductId(null);
+    setTempItemPrice('');
   };
 
   // Barcode scanner & instant feedback
@@ -918,31 +992,41 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             </div>
 
-            {settings.enableWholesale && (
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
-                <span className="text-xs font-bold text-slate-700">سعر البيع المطبق:</span>
-                <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-semibold">
-                  <button
-                    onClick={() => handleGlobalPriceTypeChange('retail')}
-                    className={`px-3 py-1 rounded-md transition ${
-                      globalPriceType === 'retail'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    سعر البيع العادي (تجزئة)
-                  </button>
-                  <button
-                    onClick={() => handleGlobalPriceTypeChange('wholesale')}
-                    className={`px-3 py-1 rounded-md transition ${
-                      globalPriceType === 'wholesale'
-                        ? 'bg-white text-emerald-800 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    سعر الجملة
-                  </button>
+            {settings.enableWholesale ? (
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80 gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-slate-700">سعر البيع:</span>
+                  <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-semibold">
+                    <button
+                      onClick={() => handleGlobalPriceTypeChange('retail')}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        globalPriceType === 'retail'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      مفرد
+                    </button>
+                    <button
+                      onClick={() => handleGlobalPriceTypeChange('wholesale')}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        globalPriceType === 'wholesale'
+                          ? 'bg-white text-emerald-800 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      سعر الجملة
+                    </button>
+                  </div>
                 </div>
+
+                {/* زر التبديل بين جلسة الأدمن وجلسة الموظف بجانب سعر بيع الجملة مباشرة */}
+                <SessionBadgeButton compact={true} />
+              </div>
+            ) : (
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
+                <span className="text-xs font-bold text-slate-700">جلسة النظام:</span>
+                <SessionBadgeButton compact={true} />
               </div>
             )}
 
@@ -957,7 +1041,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
               </div>
             ) : (
               <div className="space-y-2">
-                {cartItems.map((item) => {
+                {cartItems.map((item, index) => {
                   const cartonCapacity = item.piecesPerCarton || 1;
                   const isCarton = item.unitType === 'carton';
                   const prodRef = products.find(p => p.id === item.productId);
@@ -975,9 +1059,21 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                       <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
+                            <span 
+                              className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 font-mono text-[11px] font-bold flex items-center justify-center shrink-0" 
+                              title={`رقم تسلسل المادة في الطلب: ${index + 1}`}
+                            >
+                              {index + 1}
+                            </span>
                             <span className="text-xs font-bold text-slate-900 leading-snug">
                               {item.productName}
                             </span>
+                            {item.isCustomPrice && (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 flex items-center gap-0.5">
+                                <Pencil className="w-2.5 h-2.5 text-blue-600" />
+                                <span>سعر خاص بالقائمة</span>
+                              </span>
+                            )}
                             {isStockZero && (
                               <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[10px] font-black animate-pulse">
                                 رصيد القطع صفر بالمخزن ({prodRef?.stock ?? 0})
@@ -1004,6 +1100,22 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                         </div>
 
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* زر صغير على شكل قلم لتعديل السعر في هذه القائمة فقط للزبون */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleEditCartItemPrice(item)}
+                            className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center shrink-0 ${
+                              editingPriceProductId === item.productId
+                                ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-300'
+                                : item.isCustomPrice
+                                ? 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200'
+                                : 'bg-white text-blue-600 hover:text-blue-800 border-slate-300 hover:border-blue-400 hover:bg-blue-50 shadow-2xs'
+                            }`}
+                            title="تعديل سعر البيع في هذه القائمة فقط للزبون"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
                           <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-md border border-slate-300 text-[10px] font-bold">
                             <button
                               type="button"
@@ -1063,6 +1175,118 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                         </div>
                       </div>
 
+                      {/* لوحة تعديل السعر المباشر في هذه القائمة فقط عند الضغط على زر القلم */}
+                      {editingPriceProductId === item.productId && (
+                        <div className="bg-blue-50/90 border border-blue-300 rounded-lg p-2.5 my-0.5 flex flex-col gap-2 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-blue-950">
+                              <Pencil className="w-3.5 h-3.5 text-blue-600" />
+                              <span>تعديل سعر البيع في هذه القائمة فقط للزبون:</span>
+                            </div>
+                            <div className="text-[10px] text-slate-600 font-medium">
+                              سعر التكلفة: <span className="font-bold text-slate-800 font-mono">{formatMoney(item.costPrice)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <div className="relative flex-1">
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={tempItemPrice}
+                                onChange={(e) => setTempItemPrice(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveCartItemPrice(item.productId);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingPriceProductId(null);
+                                  }
+                                }}
+                                placeholder={`السعر للـ ${isCarton ? 'كرتون' : (item.unit || 'قطعة')}...`}
+                                className="w-full pl-8 pr-2.5 py-1.5 text-sm font-bold bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-mono"
+                                autoFocus
+                              />
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400">
+                                {settings.currency}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleSaveCartItemPrice(item.productId)}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>حفظ السعر</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setEditingPriceProductId(null)}
+                              className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer shrink-0"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+
+                          {/* تنبيه إذا كان السعر أقل من التكلفة */}
+                          {Number(tempItemPrice) < item.costPrice && Number(tempItemPrice) > 0 && (
+                            <div className="text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-0.5 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                              <span>تنبيه: السعر المدخل أقل من التكلفة ({formatMoney(item.costPrice)})</span>
+                            </div>
+                          )}
+
+                          {/* أزرار سريعة للاستعادة أو أسعار النظام الأصلية */}
+                          <div className="flex items-center gap-2 text-[10px] text-slate-600 pt-0.5 border-t border-blue-200/60 flex-wrap">
+                            <span className="text-slate-500 font-semibold">استعادة سريعة:</span>
+                            {prodRef && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const defaultRetail = isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice;
+                                    setTempItemPrice(String(defaultRetail));
+                                  }}
+                                  className="text-blue-700 hover:text-blue-900 font-bold underline cursor-pointer"
+                                >
+                                  سعر المفرد ({formatMoney(isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice)})
+                                </button>
+                                {settings.enableWholesale && (
+                                  <>
+                                    <span>·</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const defaultWholesale = isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice;
+                                        setTempItemPrice(String(defaultWholesale));
+                                      }}
+                                      className="text-amber-800 hover:text-amber-950 font-bold underline cursor-pointer"
+                                    >
+                                      سعر الجملة ({formatMoney(isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice)})
+                                    </button>
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {item.isCustomPrice && (
+                              <>
+                                <span>·</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetCartItemPrice(item.productId)}
+                                  className="text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                                >
+                                  إلغاء السعر الخاص
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
                         <div className="flex items-center gap-1.5">
                           <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
@@ -1101,10 +1325,19 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                           )}
                         </div>
 
-                        <div className="text-right">
-                          <span className="text-[11px] text-slate-500">
-                            {formatMoney(item.unitPrice)} × {item.quantity} =
-                          </span>
+                        <div className="text-right flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleEditCartItemPrice(item)}
+                            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-700 transition cursor-pointer group"
+                            title="انقر لتعديل السعر في هذه القائمة فقط"
+                          >
+                            <span className={item.isCustomPrice ? 'font-mono text-blue-700 font-black underline' : 'font-mono'}>
+                              {formatMoney(item.unitPrice)}
+                            </span>
+                            <Pencil className="w-2.5 h-2.5 text-blue-500 opacity-70 group-hover:opacity-100" />
+                            <span>× {item.quantity} =</span>
+                          </button>
                           <span className="font-extrabold text-slate-900 mr-1.5">
                             {formatMoney(item.total)}
                           </span>
