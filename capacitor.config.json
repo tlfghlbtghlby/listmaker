@@ -1,0 +1,6 @@
+{
+  "appId": "com.listmaker.pos",
+  "appName": "ListMaker POS",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
