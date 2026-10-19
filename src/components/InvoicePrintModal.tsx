@@ -288,21 +288,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
     }
   };
 
+  // تهيئة الطباعة لطابعات البلوتوث والحرارية على أندرويد
   const handleBluetoothPrint = async () => {
-    try {
-      if ('bluetooth' in navigator) {
-        await (navigator as any).bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb']
-        });
-      } else {
-        setPrintLayout('thermal80');
-        setTimeout(() => window.print(), 200);
-      }
-    } catch (e) {
-      setPrintLayout('thermal80');
-      setTimeout(() => window.print(), 200);
-    }
+    setPrintLayout('thermal80');
+    setTimeout(() => {
+      window.print();
+    }, 150);
   };
 
   return (
@@ -310,12 +301,15 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
       <style dangerouslySetInnerHTML={{
         __html: `
           @media print {
+            .no-print, .print-modal-overlay > *:not(.print-modal-card), button {
+              display: none !important;
+            }
             @page {
               size: ${printLayout === 'a4' ? 'A4 portrait' : printLayout === 'a5' ? 'A5 portrait' : printLayout === 'thermal58' ? '58mm auto' : '80mm auto'};
               margin: ${isThermal ? '1mm 1mm 1mm 1mm' : printLayout === 'a5' ? '2mm 4mm 4mm 4mm' : '2mm 5mm 5mm 5mm'} !important;
             }
-            ${printLayout === 'thermal58' ? '#printable-invoice { width: 48mm !important; max-width: 48mm !important; padding: 0 !important; font-size: 10px !important; }' : ''}
-            ${printLayout === 'thermal80' ? '#printable-invoice { width: 72mm !important; max-width: 72mm !important; padding: 0 !important; font-size: 11px !important; }' : ''}
+            ${printLayout === 'thermal58' ? '#printable-invoice { width: 54mm !important; max-width: 54mm !important; padding: 2mm !important; font-size: 10px !important; margin: 0 auto !important; }' : ''}
+            ${printLayout === 'thermal80' ? '#printable-invoice { width: 76mm !important; max-width: 76mm !important; padding: 2mm !important; font-size: 11px !important; margin: 0 auto !important; }' : ''}
             ${printLayout === 'a5' ? '#printable-invoice { width: 100% !important; max-width: 100% !important; }' : ''}
             ${printLayout === 'a4' ? '#printable-invoice { width: 100% !important; max-width: 100% !important; }' : ''}
           }
