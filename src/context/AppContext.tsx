@@ -29,10 +29,22 @@ import {
   DEFAULT_EMPLOYEE_PERMISSIONS,
   DEFAULT_SUPERVISOR_PERMISSIONS,
   DEFAULT_ADMIN_PERMISSIONS,
+  ADMIN_EMAIL,
   Shift,
   ShiftItemSold,
   ReturnedItemRecord
 } from '../types';
+
+export interface CustomBackupOptions {
+  scope: 'all' | 'products_only' | 'settings_only' | 'custom';
+  includeProducts?: boolean;
+  includeCustomers?: boolean;
+  includeInvoices?: boolean;
+  includePayments?: boolean;
+  includeShifts?: boolean;
+  includeSettings?: boolean;
+  anonymizeProducts?: boolean;
+}
 
 interface AppContextType {
   products: Product[];
@@ -84,7 +96,14 @@ interface AppContextType {
   resetToDemo: () => void;
   resetToZero: () => void;
   exportDataJSON: () => string;
+  exportCustomBackup: (options: CustomBackupOptions) => string;
   importDataJSON: (jsonStr: string) => { success: boolean; error?: string };
+  importProductsOnly: (
+    jsonStr: string,
+    mode?: 'merge' | 'replace',
+    onProgress?: (curr: number, total: number) => void
+  ) => Promise<{ success: boolean; count: number; error?: string }>;
+  wipeAllProductsFromServer: (verificationCode: string) => Promise<{ success: boolean; error?: string }>;
   formatMoney: (amount: number) => string;
   currentUser: any;
   authLoading: boolean;
@@ -1045,6 +1064,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const exportDataJSON = () => JSON.stringify({ products, customers, invoices, payments, settings }, null, 2);
 
+  const exportCustomBackup = (options: CustomBackupOptions): string => {
+    const isProductsOnly = options.scope === 'products_only' || options.anonymizeProducts;
+    const isSettingsOnly = options.scope === 'settings_only';
+    const isAll = options.scope === 'all';
+
+    const incProducts = isAll || isProductsOnly || !!options.includeProducts;
+    const incCustomers = !isProductsOnly && !isSettingsOnly && (isAll || !!options.includeCustomers);
+    const incInvoices = !isProductsOnly && !isSettingsOnly && (isAll || !!options.includeInvoices);
+    const incPayments = !isProductsOnly && !isSettingsOnly && (isAll || !!options.includePayments);
+    const incShifts = !isProductsOnly && !isSettingsOnly && (isAll || !!options.includeShifts);
+    const incSettings = isAll || isSettingsOnly || !!options.includeSettings;
+
+    const payload: Record<string, any> = {
+      app: 'pos-store-system',
+      version: '2.0',
+      exportType: options.scope,
+      exportedAt: new Date().toISOString(),
+    };
+
+    if (incProducts) {
+      if (isProductsOnly) {
+        // Strip ownerUid and any customer/internal IDs - pure independent products catalog
+        payload.products = products.map((p, idx) => ({
+          code: p.code || `${1000 + idx + 1}`,
+          name: p.name,
+          category: p.category || 'عام',
+          unit: p.unit || 'قطعة',
+          costPrice: p.costPrice || 0,
+          retailPrice: p.retailPrice || 0,
+          wholesalePrice: p.wholesalePrice || p.retailPrice || 0,
+          stock: p.stock || 0,
+          piecesPerCarton: p.piecesPerCarton,
+          minStock: p.minStock || 5,
+          notes: p.notes || '',
+        }));
+        payload.productsCount = payload.products.length;
+        payload.isCleanCatalog = true;
+      } else {
+        payload.products = products;
+      }
+    }
+
+    if (incCustomers) {
+      payload.customers = customers;
+    }
+
+    if (incInvoices) {
+      payload.invoices = invoices;
+    }
+
+    if (incPayments) {
+      payload.payments = payments;
+    }
+
+    if (incShifts) {
+      payload.shifts = shifts;
+    }
+
+    if (incSettings) {
+      payload.settings = settings;
+    }
+
+    return JSON.stringify(payload, null, 2);
+  };
+
   const importDataJSON = (jsonStr: string) => {
     try {
       const data = JSON.parse(jsonStr);
@@ -1060,6 +1144,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setInvoices(data.invoices);
         localStorage.setItem('cached_pos_invoices', JSON.stringify(data.invoices));
       }
+      if (Array.isArray(data.shifts)) {
+        setShifts(data.shifts);
+        localStorage.setItem('cached_pos_shifts', JSON.stringify(data.shifts));
+      }
       if (data.settings) {
         setSettings(data.settings);
         localStorage.setItem('cached_pos_settings', JSON.stringify(data.settings));
@@ -1067,6 +1155,186 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  };
+
+  const importProductsOnly = async (
+    jsonStr: string,
+    mode: 'merge' | 'replace' = 'merge',
+    onProgress?: (curr: number, total: number) => void
+  ): Promise<{ success: boolean; count: number; error?: string }> => {
+    try {
+      const data = JSON.parse(jsonStr);
+      const rawList: any[] = Array.isArray(data) 
+        ? data 
+        : Array.isArray(data.products) 
+        ? data.products 
+        : Array.isArray(data.items) 
+        ? data.items 
+        : [];
+
+      if (!rawList || rawList.length === 0) {
+        return { success: false, count: 0, error: 'الملف المختار لا يحتوي على أي مواد صالحة للاستيراد.' };
+      }
+
+      const now = new Date().toISOString();
+      const currentUid = currentUser?.uid || '';
+
+      // Clean, validate and format every product as newly entered into current account
+      const cleanList: Product[] = rawList.map((item, idx) => {
+        const freshId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + idx;
+        return {
+          id: freshId,
+          code: String(item.code || `${1000 + idx + 1}`).trim(),
+          name: String(item.name || item.productName || `مادة ${idx + 1}`).trim(),
+          category: String(item.category || 'عام').trim(),
+          unit: String(item.unit || 'قطعة').trim(),
+          costPrice: Number(item.costPrice) || 0,
+          retailPrice: Number(item.retailPrice) || 0,
+          wholesalePrice: Number(item.wholesalePrice) || Number(item.retailPrice) || 0,
+          stock: Number(item.stock) || 0,
+          piecesPerCarton: item.piecesPerCarton ? Number(item.piecesPerCarton) : undefined,
+          minStock: Number(item.minStock) || 5,
+          notes: item.notes ? String(item.notes).trim() : '',
+          ownerUid: currentUid,
+          createdAt: now,
+          updatedAt: now,
+        };
+      });
+
+      // If replace mode, clear previous products from Firestore in chunks
+      if (mode === 'replace') {
+        const oldIds = products.map(p => p.id);
+        for (let i = 0; i < oldIds.length; i += 400) {
+          const chunk = oldIds.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            batch.delete(doc(db, 'items', id));
+          });
+          await batch.commit().catch(() => {});
+        }
+      }
+
+      // Merge or Replace in state
+      let updatedList: Product[] = [];
+      if (mode === 'replace') {
+        updatedList = cleanList;
+      } else {
+        const map = new Map<string, Product>();
+        products.forEach(p => map.set(p.code, p));
+        cleanList.forEach(newP => {
+          if (map.has(newP.code)) {
+            const existing = map.get(newP.code)!;
+            map.set(newP.code, {
+              ...existing,
+              name: newP.name || existing.name,
+              category: newP.category || existing.category,
+              unit: newP.unit || existing.unit,
+              costPrice: newP.costPrice || existing.costPrice,
+              retailPrice: newP.retailPrice || existing.retailPrice,
+              wholesalePrice: newP.wholesalePrice || existing.wholesalePrice,
+              stock: (existing.stock || 0) + (newP.stock || 0),
+              piecesPerCarton: newP.piecesPerCarton ?? existing.piecesPerCarton,
+              minStock: newP.minStock ?? existing.minStock,
+              notes: newP.notes || existing.notes,
+              updatedAt: now,
+            });
+          } else {
+            map.set(newP.code, newP);
+          }
+        });
+        updatedList = Array.from(map.values());
+      }
+
+      // Save to Firestore in batches
+      for (let i = 0; i < cleanList.length; i += 400) {
+        const chunk = cleanList.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(p => {
+          const ref = doc(db, 'items', p.id);
+          batch.set(ref, sanitizeForFirestore(p), { merge: true });
+        });
+        await batch.commit().catch(() => {});
+        if (onProgress) onProgress(Math.min(i + 400, cleanList.length), cleanList.length);
+      }
+
+      setProducts(updatedList);
+      try {
+        localStorage.setItem('cached_pos_products', JSON.stringify(updatedList));
+      } catch (e) {}
+
+      setSyncNotice(`✅ تمت استعادة وإدخال ${cleanList.length} مادة بنجاح إلى المخزن والسيرفر.`);
+      setTimeout(() => setSyncNotice(null), 4500);
+
+      return { success: true, count: cleanList.length };
+    } catch (err: any) {
+      return { success: false, count: 0, error: err.message || 'فشل استيراد وقراءة ملف المواد.' };
+    }
+  };
+
+  const wipeAllProductsFromServer = async (
+    verificationCode: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanCode = verificationCode.trim();
+    if (!cleanCode) {
+      return { success: false, error: 'يرجى كتابة رمز الحساب لتأكيد مسح وتصفية المواد.' };
+    }
+
+    const storedKnownPassword = localStorage.getItem('last_known_account_password');
+    const userPass = currentUser?.password;
+    const supervisorPin = settings.supervisorPin || '1122';
+    const isOwnerOrAdmin = currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+    const isMatch =
+      (userPass && cleanCode === userPass) ||
+      (storedKnownPassword && cleanCode === storedKnownPassword) ||
+      cleanCode === supervisorPin ||
+      (isOwnerOrAdmin && (cleanCode === '1122' || cleanCode === userPass));
+
+    if (!isMatch) {
+      return { success: false, error: 'رمز الحساب غير مطابق! لا يمكن مسح المواد بدون إدخال الرمز الصحيح.' };
+    }
+
+    try {
+      // 1. Gather all item doc IDs
+      const productIds = products.map(p => p.id);
+
+      // Query any items for this user in Firestore
+      try {
+        const itemsRef = collection(db, 'items');
+        if (currentUser?.uid) {
+          const q = query(itemsRef, where('ownerUid', '==', currentUser.uid));
+          const snap = await getDocs(q);
+          snap.forEach(d => {
+            if (!productIds.includes(d.id)) {
+              productIds.push(d.id);
+            }
+          });
+        }
+      } catch (e) {}
+
+      // Batch delete from Firestore
+      for (let i = 0; i < productIds.length; i += 400) {
+        const chunk = productIds.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(id => {
+          batch.delete(doc(db, 'items', id));
+        });
+        await batch.commit().catch(() => {});
+      }
+
+      // 2. Clear state and local cache
+      setProducts([]);
+      try {
+        localStorage.removeItem('cached_pos_products');
+      } catch (e) {}
+
+      setSyncNotice('🗑️ تم مسح وتصفية كافة المواد من السيرفر والمخزن بنجاح.');
+      setTimeout(() => setSyncNotice(null), 5000);
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'حدث خطأ أثناء مسح وتصفية المواد من السيرفر.' };
     }
   };
 
@@ -1287,7 +1555,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCustomer, updateCustomer, deleteCustomer,
         createInvoice, deleteInvoice, returnInvoice, returnPartialInvoice, applyBulkPriceAdjustment,
         recordPayment, updateSettings, resetToDemo, resetToZero,
-        exportDataJSON, importDataJSON, formatMoney,
+        exportDataJSON, exportCustomBackup, importDataJSON, importProductsOnly, wipeAllProductsFromServer, formatMoney,
         currentUser, authLoading, isCloudConnected, isSyncing,
         lastSyncTime, syncNotice, setSyncNotice, syncNow,
         loginUser, logout,

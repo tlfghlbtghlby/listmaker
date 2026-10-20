@@ -34,9 +34,14 @@ import {
   Zap,
   Printer,
   Users,
-  UserCheck
+  UserCheck,
+  Package,
+  PackageCheck,
+  PackagePlus
 } from 'lucide-react';
 import { QuickAddItemsSection } from './QuickAddItemsSection';
+import { ExportBackupModal } from './ExportBackupModal';
+import { WipeProductsModal } from './WipeProductsModal';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
 const AdminPanel = React.lazy(() => import('./AdminPanel'));
@@ -60,7 +65,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     settings, 
     updateSettings, 
     exportDataJSON, 
+    exportCustomBackup,
     importDataJSON, 
+    importProductsOnly,
     currentUser,
     logout,
     products,
@@ -137,7 +144,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
+  // Backup & Wipe Modals state
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
+  const [isImportingProductsOnly, setIsImportingProductsOnly] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const productsOnlyFileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
@@ -305,6 +318,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     };
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleProductsOnlyFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingProductsOnly(true);
+    setImportError(null);
+    setImportStatus('جاري استيراد ورفع المواد للمخزن والسيرفر كأنها أُضيفت يدوياً...');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const res = await importProductsOnly(content, 'merge');
+        if (res.success) {
+          setImportError(null);
+          setImportStatus(`✅ تمت استعادة وإدخال ${res.count} مادة بنجاح إلى المخزن والسيرفر كأنك أدخلتها يدوياً!`);
+          setTimeout(() => setImportStatus(null), 5000);
+        } else {
+          setImportStatus(null);
+          setImportError(res.error || 'فشلت استعادة نسخة المواد');
+          setTimeout(() => setImportError(null), 5000);
+        }
+      } catch (err: any) {
+        setImportStatus(null);
+        setImportError(err.message || 'حدث خطأ أثناء قراءة ملف المواد');
+        setTimeout(() => setImportError(null), 5000);
+      } finally {
+        setIsImportingProductsOnly(false);
+        if (productsOnlyFileInputRef.current) {
+          productsOnlyFileInputRef.current.value = '';
+        }
+      }
+    };
+    reader.onerror = () => {
+      setImportStatus(null);
+      setImportError('حدث خطأ أثناء قراءة الملف من الجهاز');
+      setIsImportingProductsOnly(false);
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -1181,16 +1235,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-5">
-            <div>
-              <h3 className="font-bold text-base text-slate-900">النسخ الاحتياطي وإدارة البيانات</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                احفظ نسخة احتياطية من المواد والمبيعات والزبائن على جهازك للرجوع إليها بأي وقت
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900">النسخ الاحتياطي وإدارة البيانات</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  احفظ نسخة مخصصة من المواد، أو إعدادات الحساب، أو نسخة شاملة، مع استعادة المواد وتصفية المخزن بأمان
+                </p>
+              </div>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 self-start sm:self-auto font-mono">
+                {products.length} مادة بالمخزن
+              </span>
             </div>
 
             {importStatus && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 flex items-center gap-1.5 shadow-2xs">
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>{importStatus}</span>
               </div>
             )}
@@ -1202,25 +1261,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* 1. Custom Download Backup */}
               <button
-                onClick={handleDownloadBackup}
-                className="p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group cursor-pointer"
+                type="button"
+                onClick={() => setIsExportModalOpen(true)}
+                className="p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/20 text-right flex flex-col justify-between transition group cursor-pointer shadow-2xs"
               >
-                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition">
-                  <Download className="w-4 h-4" />
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition shadow-xs">
+                    <Download className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800">
+                    تخصيص حر ⚙️
+                  </span>
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-slate-900">تحميل نسخة احتياطية</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    تنزيل ملف JSON يحفظ كافة البيانات
+                  <div className="font-extrabold text-sm text-slate-900 group-hover:text-emerald-950 transition">
+                    تحميل نسخة احتياطية (تخصيص حسب الرغبة)
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    حفظ المواد فقط بدون بيانات الزبائن، أو إعدادات الحساب، أو نسخة شاملة لكل السجلات.
                   </div>
                 </div>
               </button>
 
+              {/* 2. Full Restore */}
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-slate-50 text-right flex flex-col justify-between transition group cursor-pointer"
+                className="p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/20 text-right flex flex-col justify-between transition group cursor-pointer shadow-2xs"
               >
                 <input
                   type="file"
@@ -1229,16 +1298,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   accept=".json"
                   className="hidden"
                 />
-                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-2 group-hover:bg-blue-600 group-hover:text-white transition">
-                  <Upload className="w-4 h-4" />
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition shadow-xs">
+                    <Upload className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-100/80 text-blue-800">
+                    ملف شامل
+                  </span>
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-slate-900">استعادة من ملف</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    رفع ملف نسخة احتياطية سابقة
+                  <div className="font-extrabold text-sm text-slate-900 group-hover:text-blue-950 transition">
+                    استعادة نسخة شاملة من ملف
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    رفع ملف نسخة احتياطية سابقة واسترجاع كافة البيانات (المواد، العملاء، الفواتير، الإعدادات).
                   </div>
                 </div>
               </div>
+
+              {/* 3. Restore Products Only */}
+              <div
+                onClick={() => !isImportingProductsOnly && productsOnlyFileInputRef.current?.click()}
+                className={`p-4 rounded-xl border text-right flex flex-col justify-between transition group shadow-2xs ${
+                  isImportingProductsOnly
+                    ? 'border-indigo-300 bg-indigo-50/50 cursor-wait'
+                    : 'border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/20 cursor-pointer'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={productsOnlyFileInputRef}
+                  onChange={handleProductsOnlyFileSelect}
+                  accept=".json"
+                  className="hidden"
+                />
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition shadow-xs">
+                    {isImportingProductsOnly ? (
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                    ) : (
+                      <PackageCheck className="w-4 h-4" />
+                    )}
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                    جديد • للمواد فقط
+                  </span>
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-slate-900 group-hover:text-indigo-950 transition">
+                    استعادة نسخة المواد فقط (إدخال تلقائي للمخزن)
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    رفع ملف المواد وإدخالها فوراً للمخزن والسيرفر كأنك أدخلتها يدوياً دون المساس ببيانات زبائنك.
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Wipe All Products From Server */}
+              <button
+                type="button"
+                onClick={() => setIsWipeModalOpen(true)}
+                className="p-4 rounded-xl border border-slate-200 hover:border-rose-400 hover:bg-rose-50/30 text-right flex flex-col justify-between transition group cursor-pointer shadow-2xs"
+              >
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center group-hover:bg-rose-600 group-hover:text-white transition shadow-xs">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                    محمي برمز الحساب 🔒
+                  </span>
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-rose-950 transition">
+                    مسح وتصفية كافة المواد من السيرفر
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    تصفير وحذف جميع المواد نهائياً من قاعدة بيانات السيرفر بعد إدخال رمز الحساب لتأكيد الأمان.
+                  </div>
+                </div>
+              </button>
             </div>
           </div>
         </>
@@ -1555,6 +1693,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
           </div>
         </>
       )}
+
+      {/* Custom Backup Modal */}
+      <ExportBackupModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+      />
+
+      {/* Wipe All Products From Server Modal */}
+      <WipeProductsModal
+        isOpen={isWipeModalOpen}
+        onClose={() => setIsWipeModalOpen(false)}
+      />
 
     </div>
   );
