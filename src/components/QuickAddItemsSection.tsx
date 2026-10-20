@@ -64,7 +64,6 @@ const SAMPLE_TEXT = `بيض, 12, 6000, 72000, 6500, 78000, 1ك
 معجون أسنان كولجيت, 12, 1000, 12000, 1500, 18000, 20ق, 0, 0, 629100123456`;
 
 export const QuickAddItemsSection: React.FC = () => {
-  // ✅ تم استدعاء currentUser لضمان نسبة المواد لمالكها
   const { products, addBulkProducts, formatMoney, setSyncNotice, currentUser } = useApp();
 
   const [rawText, setRawText] = useState('');
@@ -255,7 +254,6 @@ export const QuickAddItemsSection: React.FC = () => {
 
     const currentUid = currentUser?.uid || '';
 
-    // ✅ تضمين ownerUid لحفظ حقوق المواد للعميل نفسه فقط
     const itemsToSave: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[] = validItems.map((item) => ({
       name: item.name.trim(),
       code: item.barcode.trim(),
