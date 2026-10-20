@@ -70,12 +70,12 @@ export const getActiveLocalSession = (): UserProfile | null => {
   return null;
 };
 
-// Authentication helpers
+// Authentication helpers مع تخفيض استعلامات القراءة لأدنى حد
 export const loginWithEmailOrUsername = async (identifier: string, password: string) => {
   const cleanId = identifier.trim().toLowerCase();
   const cleanPass = password.trim();
 
-  // 1. حساب المدير الافتراضي للطوارئ إذا تطابق الاسم وكلمة المرور
+  // 1. حساب المدير الافتراضي للطوارئ
   if ((cleanId === 'admin' || cleanId === ADMIN_EMAIL.toLowerCase()) && (cleanPass === 'admin123' || cleanPass === '123456')) {
     const adminUser: UserProfile = {
       uid: 'admin_root',
@@ -93,28 +93,53 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     return adminUser as any;
   }
 
-  // 2. التحقق من الحساب المخزن محلياً للطوارئ (إذا كان النت مقطوعاً تماماً)
-  if (!navigator.onLine) {
-    const cached = getActiveLocalSession();
-    if (
-      cached &&
-      (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)
-    ) {
-      if (cached.password && cached.password !== cleanPass) {
-        throw new Error('كلمة المرور غير صحيحة.');
-      }
-      return {
-        uid: cached.uid,
-        email: cached.email,
-        username: cached.username,
-        displayName: cached.displayName || cached.username,
-        password: cleanPass,
-        role: cached.role || 'client',
-      } as any;
+  // 2. التحقق من الكاش المحلي أولاً لتوفير القراءة من السيرفر تماماً
+  const cached = getActiveLocalSession();
+  if (
+    cached &&
+    (cached.username?.toLowerCase() === cleanId || cached.email?.toLowerCase() === cleanId)
+  ) {
+    if (cached.password && String(cached.password).trim() !== cleanPass) {
+      throw new Error('كلمة المرور غير صحيحة.');
     }
+    return {
+      uid: cached.uid,
+      email: cached.email,
+      username: cached.username,
+      displayName: cached.displayName || cached.username,
+      password: cleanPass,
+      role: cached.role || 'client',
+    } as any;
   }
 
-  // 3. البحث في Firestore عن الحساب (من الذاكرة المؤقتة الدائمة أو السيرفر)
+  // 3. التحقق عبر خادم التطبيق المحلي الداخلي أولاً لتفادي احتساب قراءة من Firestore
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
+    });
+    const data = await res.json();
+    if (data.success && data.user) {
+      const u = data.user;
+      const profile: UserProfile = {
+        uid: u.uid,
+        email: u.email || '',
+        username: u.username || cleanId,
+        displayName: u.displayName || u.username || cleanId,
+        storeName: u.storeName || '',
+        phone: u.phone || '',
+        password: cleanPass,
+        role: u.role || 'client',
+        isActive: true,
+        createdAt: new Date().toISOString()
+      };
+      saveLocalSession(profile);
+      return profile as any;
+    }
+  } catch (e) {}
+
+  // 4. استعلام Firestore كخيار أخير إذا لم يعثر عليه محلياً
   const usersRef = collection(db, 'users');
   let matchedUser: any = null;
 
@@ -137,79 +162,10 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       }
     }
   } catch (err) {
-    // محاولة الاستعلام الاحتياطي عبر نقطة النهاية المحلية
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
-      });
-      const data = await res.json();
-      if (data.success && data.user) {
-        const u = data.user;
-        const profile: UserProfile = {
-          uid: u.uid,
-          email: u.email || '',
-          username: u.username || cleanId,
-          displayName: u.displayName || u.username || cleanId,
-          storeName: u.storeName || '',
-          phone: u.phone || '',
-          password: cleanPass,
-          role: u.role || 'client',
-          isActive: true,
-          createdAt: new Date().toISOString()
-        };
-        saveLocalSession(profile);
-        return profile as any;
-      }
-    } catch (e) {}
-
-    // في حال فشل الاستعلام تماماً لعدم وجود نت، نتحقق من الكاش المخزن
-    const cached = getActiveLocalSession();
-    if (cached && (cached.username.toLowerCase() === cleanId || cached.email.toLowerCase() === cleanId)) {
-      if (cached.password && cached.password !== cleanPass) {
-        throw new Error('كلمة المرور غير صحيحة.');
-      }
-      return {
-        uid: cached.uid,
-        email: cached.email,
-        username: cached.username,
-        displayName: cached.displayName || cached.username,
-        password: cleanPass,
-        role: cached.role || 'client',
-      } as any;
-    }
-    throw new Error('لا يوجد اتصال بالإنترنت ولم يتم العثور على جلسة سابقة لهذا الجهاز.');
+    throw new Error('تعذر الاتصال بالسيرفر، ولم يتم العثور على جلسة محلية مسجلة لهذا الحساب.');
   }
 
-  // إذا لم يعثر عليه في Firestore، نجرب خادم التطبيق المحلي
   if (!matchedUser) {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
-      });
-      const data = await res.json();
-      if (data.success && data.user) {
-        const u = data.user;
-        const profile: UserProfile = {
-          uid: u.uid,
-          email: u.email || '',
-          username: u.username || cleanId,
-          displayName: u.displayName || u.username || cleanId,
-          storeName: u.storeName || '',
-          phone: u.phone || '',
-          password: cleanPass,
-          role: u.role || 'client',
-          isActive: true,
-          createdAt: new Date().toISOString()
-        };
-        saveLocalSession(profile);
-        return profile as any;
-      }
-    } catch (e) {}
-
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة.');
   }
 
@@ -269,7 +225,6 @@ export const changeAccountPassword = async (
     const cleanNew = newPass.trim();
     let firestoreUpdated = false;
 
-    // 1. تحديث Firestore إذا توفر الاتصال
     try {
       const userDocRef = doc(db, 'users', uid);
       const snap = await getDoc(userDocRef);
@@ -285,7 +240,6 @@ export const changeAccountPassword = async (
       console.warn('Firestore password update notice:', e);
     }
 
-    // 2. تحديث السيرفر الداخلي
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
@@ -298,7 +252,6 @@ export const changeAccountPassword = async (
       }
     } catch (e) {}
 
-    // 3. تحديث الجلسة المحفوظة محلياً لضمان الانتقال الفوري بين الجلسات
     try {
       const activeStr = localStorage.getItem('active_client_session');
       if (activeStr) {
