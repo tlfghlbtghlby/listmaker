@@ -8,7 +8,7 @@ interface SessionBadgeButtonProps {
 }
 
 export const SessionBadgeButton: React.FC<SessionBadgeButtonProps> = ({ className = '', compact = false }) => {
-  const { sessionRole, openSessionModal } = useApp();
+  const { sessionRole, openSessionModal, activeSupervisorName } = useApp();
 
   const getRoleConfig = () => {
     switch (sessionRole) {
@@ -22,8 +22,8 @@ export const SessionBadgeButton: React.FC<SessionBadgeButtonProps> = ({ classNam
         };
       case 'supervisor':
         return {
-          title: 'جلسة المشرف',
-          sub: 'صلاحيات وسطية',
+          title: activeSupervisorName ? `جلسة ${activeSupervisorName}` : 'جلسة المشرف',
+          sub: 'صلاحيات إشرافية',
           icon: <UserCheck className="w-3.5 h-3.5 text-blue-300 shrink-0" />,
           btnClass: 'bg-blue-900 hover:bg-blue-800 text-white border-blue-700 shadow-xs ring-1 ring-blue-400/40',
           badgeClass: 'bg-blue-950 text-blue-200 border border-blue-800',

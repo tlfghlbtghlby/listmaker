@@ -11,7 +11,9 @@ export const ShiftHeaderButton: React.FC<ShiftHeaderButtonProps> = ({ onOpenShif
     activeShift, 
     hasPermission, 
     setIsStartShiftModalOpen, 
-    setIsEndShiftModalOpen 
+    setIsEndShiftModalOpen,
+    setSelectedShiftForDetails,
+    getShiftStats
   } = useApp();
 
   const [elapsed, setElapsed] = useState<string>('00:00:00');
@@ -41,7 +43,8 @@ export const ShiftHeaderButton: React.FC<ShiftHeaderButtonProps> = ({ onOpenShif
     return () => clearInterval(interval);
   }, [activeShift]);
 
-  if (!hasPermission('canManageShifts')) {
+  // إذا لم يكن هناك شفت نشط ولا يملك صلاحية بدء الشفت
+  if (!activeShift && !hasPermission('canManageShifts')) {
     return null;
   }
 
@@ -52,7 +55,7 @@ export const ShiftHeaderButton: React.FC<ShiftHeaderButtonProps> = ({ onOpenShif
         type="button"
         onClick={() => setIsStartShiftModalOpen(true)}
         className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs whitespace-nowrap bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-500 active:scale-95"
-        title="انقر لبدء شفت عمل جديد وتشغيل المؤقت وحساب المواد والمبيعات"
+        title="انقر لبدء شفت عمل جديد واختيار قالب الشفت والرمز السري"
       >
         <Play className="w-3.5 h-3.5 fill-current text-indigo-200 shrink-0" />
         <span>بدء الشفت</span>
@@ -60,13 +63,29 @@ export const ShiftHeaderButton: React.FC<ShiftHeaderButtonProps> = ({ onOpenShif
     );
   }
 
-  // إذا كان هناك شفت نشط -> إظهار المؤقت الحي مع خيار إنهاء الشفت
+  // إذا كان هناك شفت نشط -> إظهار المؤقت الحي مع خيار إنهاء الشفت أو معاينته
+  const handleShiftClick = () => {
+    if (hasPermission('canManageShifts')) {
+      setIsEndShiftModalOpen(true);
+    } else {
+      const liveStats = getShiftStats(activeShift);
+      setSelectedShiftForDetails({
+        ...activeShift,
+        ...liveStats
+      });
+    }
+  };
+
   return (
     <button
       type="button"
-      onClick={() => setIsEndShiftModalOpen(true)}
+      onClick={handleShiftClick}
       className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 border transition cursor-pointer shadow-sm whitespace-nowrap bg-slate-900 border-amber-500/70 text-white hover:bg-slate-800 ring-2 ring-amber-500/30 group active:scale-95"
-      title={`شفت رقم #${activeShift.shiftNumber} قيد العمل - انقر لإظهار الملخص أو إنهاء الشفت`}
+      title={
+        activeShift.presetShiftName 
+          ? `شفت: ${activeShift.presetShiftName} (#${activeShift.shiftNumber}) قيد العمل - انقر لإظهار الملخص أو الإنهاء`
+          : `شفت رقم #${activeShift.shiftNumber} قيد العمل - انقر لإظهار الملخص أو الإنهاء`
+      }
     >
       <span className="relative flex h-2 w-2 shrink-0">
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -79,9 +98,21 @@ export const ShiftHeaderButton: React.FC<ShiftHeaderButtonProps> = ({ onOpenShif
         {elapsed}
       </span>
 
-      <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-500/30">
-        إنهاء الشفت
-      </span>
+      {activeShift.presetShiftName && (
+        <span className="text-[10px] text-slate-300 hidden md:inline font-normal bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
+          {activeShift.presetShiftName}
+        </span>
+      )}
+
+      {hasPermission('canManageShifts') ? (
+        <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-500/30">
+          إنهاء الشفت
+        </span>
+      ) : (
+        <span className="bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded text-[10px] font-bold border border-emerald-500/30">
+          نشط
+        </span>
+      )}
     </button>
   );
 };

@@ -23,10 +23,16 @@ export const SessionSwitchModal: React.FC = () => {
     setIsSessionModalOpen,
     targetSessionForModal,
     setTargetSessionForModal,
-    currentUser
+    targetSupervisorIdForModal,
+    setTargetSupervisorIdForModal,
+    currentUser,
+    settings,
+    activeSupervisorId
   } = useApp();
 
+  const supervisors = settings.supervisors || [];
   const [selectedRole, setSelectedRole] = useState<SessionRole>('admin');
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState<string | null>(null);
   const [passwordOrPin, setPasswordOrPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -34,17 +40,24 @@ export const SessionSwitchModal: React.FC = () => {
 
   useEffect(() => {
     if (isSessionModalOpen) {
-      if (targetSessionForModal) {
+      if (targetSupervisorIdForModal) {
+        setSelectedRole('supervisor');
+        setSelectedSupervisorId(targetSupervisorIdForModal);
+      } else if (targetSessionForModal) {
         setSelectedRole(targetSessionForModal);
+        if (targetSessionForModal === 'supervisor') {
+          setSelectedSupervisorId(activeSupervisorId || (supervisors[0]?.id || null));
+        }
       } else {
         // إذا كان حالياً موظف نقترح التحويل لأدمن، والعكس
-        setSelectedRole(sessionRole === 'employee' ? 'admin' : 'employee');
+        const nextRole: SessionRole = sessionRole === 'employee' ? 'admin' : 'employee';
+        setSelectedRole(nextRole);
       }
       setPasswordOrPin('');
       setErrorMsg(null);
       setShowPassword(false);
     }
-  }, [isSessionModalOpen, targetSessionForModal, sessionRole]);
+  }, [isSessionModalOpen, targetSessionForModal, targetSupervisorIdForModal, sessionRole, activeSupervisorId, supervisors]);
 
   if (!isSessionModalOpen) return null;
 
@@ -54,10 +67,11 @@ export const SessionSwitchModal: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const result = await switchSession(selectedRole, passwordOrPin);
+      const result = await switchSession(selectedRole, passwordOrPin, selectedSupervisorId || undefined);
       if (result.success) {
         setIsSessionModalOpen(false);
         setTargetSessionForModal(null);
+        setTargetSupervisorIdForModal(null);
         setPasswordOrPin('');
       } else {
         setErrorMsg(result.error || 'فشل التحقق من الرمز المدخل');
@@ -84,6 +98,8 @@ export const SessionSwitchModal: React.FC = () => {
     setPasswordOrPin('');
   };
 
+  const selectedSupervisor = supervisors.find(s => s.id === selectedSupervisorId) || supervisors[0];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/75 backdrop-blur-xs animate-fadeIn overflow-y-auto" dir="rtl">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden my-auto">
@@ -108,6 +124,7 @@ export const SessionSwitchModal: React.FC = () => {
             onClick={() => {
               setIsSessionModalOpen(false);
               setTargetSessionForModal(null);
+              setTargetSupervisorIdForModal(null);
             }}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
           >
@@ -145,6 +162,9 @@ export const SessionSwitchModal: React.FC = () => {
               type="button"
               onClick={() => {
                 setSelectedRole('supervisor');
+                if (!selectedSupervisorId && supervisors.length > 0) {
+                  setSelectedSupervisorId(supervisors[0].id);
+                }
                 setErrorMsg(null);
               }}
               className={`p-3 rounded-xl border text-center transition flex flex-col items-center gap-1.5 cursor-pointer ${
@@ -156,7 +176,7 @@ export const SessionSwitchModal: React.FC = () => {
               <UserCheck className={`w-5 h-5 ${selectedRole === 'supervisor' ? 'text-blue-400' : 'text-slate-600'}`} />
               <div className="text-xs font-black">جلسة المشرف</div>
               <div className={`text-[10px] leading-tight ${selectedRole === 'supervisor' ? 'text-blue-200' : 'text-slate-500'}`}>
-                صلاحيات وسطية
+                {supervisors.length > 1 ? `${supervisors.length} مشرفين` : 'صلاحيات وسطية'}
               </div>
             </button>
 
@@ -181,6 +201,44 @@ export const SessionSwitchModal: React.FC = () => {
             </button>
           </div>
 
+          {/* Multiple Supervisors Selector when Supervisor role is selected */}
+          {selectedRole === 'supervisor' && supervisors.length > 0 && (
+            <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5 space-y-1.5">
+              <span className="text-xs font-bold text-blue-900 block">
+                اختر المشرف المطلوب للدخول بجلسته:
+              </span>
+              <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
+                {supervisors.map((sup) => {
+                  const isCur = selectedSupervisorId === sup.id || (!selectedSupervisorId && sup.id === supervisors[0].id);
+                  return (
+                    <button
+                      key={sup.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSupervisorId(sup.id);
+                        setErrorMsg(null);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-between cursor-pointer border ${
+                        isCur
+                          ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                          : 'bg-white text-blue-950 border-blue-200 hover:bg-blue-100/60'
+                      }`}
+                    >
+                      <span className="truncate">{sup.name}</span>
+                      {sup.canConfigureShifts && (
+                        <span className={`text-[9px] px-1 py-0.2 rounded font-normal ${
+                          isCur ? 'bg-blue-700 text-blue-100' : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          إعداد شفتات
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Description of Selected Role */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700 space-y-1">
             {selectedRole === 'admin' && (
@@ -204,10 +262,10 @@ export const SessionSwitchModal: React.FC = () => {
               <>
                 <div className="font-bold text-blue-900 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-blue-600" />
-                  <span>تتطلب الرمز السري للمشرف (الافتراضي 1122):</span>
+                  <span>تتطلب الرمز السري للمشرف ({selectedSupervisor?.name || 'المشرف'}):</span>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  تتيح للمشرف صلاحية البيع، إضافة المواد، معاينة واستعادة الفواتير، وإدارة الزبائن، مع حجب الإعدادات والتقارير المالية.
+                  تتيح للمشرف صلاحية البيع، إضافة المواد، معاينة واستعادة الفواتير، وإدارة الزبائن، مع إمكانية إعداد الشفتات إن كانت ممنوحة له من قبل الأدمن.
                 </p>
               </>
             )}
@@ -230,7 +288,9 @@ export const SessionSwitchModal: React.FC = () => {
             <form onSubmit={handleSwitch} className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {selectedRole === 'admin' ? 'أدخل كلمة مرور الحساب (رمز الحساب):' : 'أدخل الرمز السري للمشرف:'}
+                  {selectedRole === 'admin' 
+                    ? 'أدخل كلمة مرور الحساب (رمز الحساب):' 
+                    : `أدخل الرمز السري للمشرف (${selectedSupervisor?.name || 'المشرف'}):`}
                 </label>
                 <div className="relative">
                   <input

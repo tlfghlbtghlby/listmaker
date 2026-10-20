@@ -149,7 +149,29 @@ export interface Shift {
   totalCost: number; // إجمالي تكلفة البضاعة المباعة
   totalProfit: number; // صافي الربح المحقق في الشفت
   itemsSold: ShiftItemSold[]; // قائمة المواد المباعة وإحصائيات كل مادة
+  presetShiftId?: string; // معرف الشفت المعد مسبقاً
+  presetShiftName?: string; // اسم الشفت المعد مسبقاً
   notes?: string;
+  createdAt: string;
+}
+
+// قالب شفت معد مسبقاً له اسم ورمز سري خاص
+export interface PresetShift {
+  id: string;
+  name: string; // اسم الشفت (مثل: شفت الصباح، شفت المساء)
+  code: string; // الرمز السري الخاص بالشفت لبدئه
+  notes?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
+// مشرف معتمد في النظام مع رمزه وصلاحياته
+export interface StoreSupervisor {
+  id: string;
+  name: string; // اسم المشرف
+  pin: string; // الرمز السري للمشرف
+  canConfigureShifts?: boolean; // هل يملك صلاحية إعداد الشفتات المسبقة
+  permissions?: Partial<RolePermissions>;
   createdAt: string;
 }
 
@@ -220,6 +242,8 @@ export interface StoreSettings {
 
   // إعدادات جلسات الموظفين والمشرفين
   supervisorPin?: string; // الرمز السري لجلسة المشرف
+  supervisors?: StoreSupervisor[]; // قائمة المشرفين المتعددين مع رموزهم وصلاحياتهم
+  presetShifts?: PresetShift[]; // قائمة قوالب الشفتات المعدة مسبقاً
   employeePermissions?: Partial<RolePermissions>; // تخصيص صلاحيات الموظف
   supervisorPermissions?: Partial<RolePermissions>; // تخصيص صلاحيات المشرف
   defaultSessionOnLaunch?: SessionRole; // الجلسة الافتراضية عند فتح البرنامج
@@ -243,6 +267,7 @@ export interface RolePermissions {
   canAccessInventory: boolean; // الدخول لجدول المخزن الكامل
   canAccessShifts: boolean; // الدخول لسجل وتبويب الشفتات
   canManageShifts: boolean; // بدء وإنهاء الشفت وحفظه
+  canConfigureShifts: boolean; // إعداد وتعديل وحذف الشفتات المسبقة
 }
 
 export const DEFAULT_EMPLOYEE_PERMISSIONS: RolePermissions = {
@@ -258,6 +283,7 @@ export const DEFAULT_EMPLOYEE_PERMISSIONS: RolePermissions = {
   canAccessInventory: true,
   canAccessShifts: true,
   canManageShifts: true,
+  canConfigureShifts: false,
 };
 
 export const DEFAULT_SUPERVISOR_PERMISSIONS: RolePermissions = {
@@ -273,6 +299,7 @@ export const DEFAULT_SUPERVISOR_PERMISSIONS: RolePermissions = {
   canAccessInventory: true,
   canAccessShifts: true,
   canManageShifts: true,
+  canConfigureShifts: true,
 };
 
 export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = {
@@ -288,4 +315,5 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = {
   canAccessInventory: true,
   canAccessShifts: true,
   canManageShifts: true,
+  canConfigureShifts: true,
 };

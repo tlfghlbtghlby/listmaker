@@ -33,7 +33,9 @@ import {
   Shift,
   ShiftItemSold,
   ReturnedItemRecord,
-  POSDraftOrder
+  POSDraftOrder,
+  PresetShift,
+  StoreSupervisor
 } from '../types';
 
 export interface CustomBackupOptions {
@@ -64,7 +66,7 @@ interface AppContextType {
   completeActiveDraft: () => void;
   shifts: Shift[];
   activeShift: Shift | null;
-  startShift: (startingCash?: number, notes?: string) => Promise<Shift>;
+  startShift: (startingCash?: number, notes?: string, presetShiftId?: string, shiftCode?: string) => Promise<{ success: boolean; error?: string; shift?: Shift }>;
   endShift: (notes?: string) => Promise<Shift | null>;
   getShiftStats: (shift: Shift) => {
     invoicesCount: number;
@@ -83,6 +85,14 @@ interface AppContextType {
   setIsEndShiftModalOpen: (open: boolean) => void;
   selectedShiftForDetails: Shift | null;
   setSelectedShiftForDetails: (shift: Shift | null) => void;
+  addPresetShift: (preset: Omit<PresetShift, 'id' | 'createdAt'>) => Promise<PresetShift>;
+  updatePresetShift: (id: string, updates: Partial<PresetShift>) => Promise<void>;
+  deletePresetShift: (id: string) => Promise<void>;
+  addSupervisor: (sup: Omit<StoreSupervisor, 'id' | 'createdAt'>) => Promise<StoreSupervisor>;
+  updateSupervisor: (id: string, updates: Partial<StoreSupervisor>) => Promise<void>;
+  deleteSupervisor: (id: string) => Promise<void>;
+  activeSupervisorId: string | null;
+  activeSupervisorName: string | null;
   addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Product;
   addBulkProducts: (items: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[], onProgress?: (curr: number, total: number) => void) => Promise<{ success: boolean; count: number; products: Product[] }>;
   updateProduct: (id: string, updates: Partial<Product>) => void;
@@ -127,13 +137,15 @@ interface AppContextType {
   logout: () => Promise<void>;
   sessionRole: SessionRole;
   permissions: RolePermissions;
-  switchSession: (targetRole: SessionRole, passwordOrPin?: string) => Promise<{ success: boolean; error?: string }>;
+  switchSession: (targetRole: SessionRole, passwordOrPin?: string, targetSupervisorId?: string) => Promise<{ success: boolean; error?: string }>;
   hasPermission: (action: keyof RolePermissions) => boolean;
   isSessionModalOpen: boolean;
   setIsSessionModalOpen: (open: boolean) => void;
   targetSessionForModal: SessionRole | null;
   setTargetSessionForModal: (role: SessionRole | null) => void;
-  openSessionModal: (targetRole?: SessionRole) => void;
+  targetSupervisorIdForModal: string | null;
+  setTargetSupervisorIdForModal: (id: string | null) => void;
+  openSessionModal: (targetRole?: SessionRole, targetSupervisorId?: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -154,6 +166,31 @@ const defaultEmptySettings: StoreSettings = {
   desktopLayout: 'full',
   supervisorPin: '1122',
   defaultSessionOnLaunch: 'employee',
+  supervisors: [
+    {
+      id: 'sup_default_1',
+      name: 'المشرف العام',
+      pin: '1122',
+      canConfigureShifts: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+  ],
+  presetShifts: [
+    {
+      id: 'preset_morning',
+      name: 'شفت الصباح',
+      code: '1111',
+      notes: 'شفت العمل الصباحي',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'preset_evening',
+      name: 'شفت المساء',
+      code: '2222',
+      notes: 'شفت العمل المسائي',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+  ],
 };
 
 export const sanitizeForFirestore = <T = any>(obj: T): T => {
@@ -409,29 +446,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'employee';
   });
 
+  const [activeSupervisorId, setActiveSupervisorId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('active_supervisor_id') || null;
+    } catch {
+      return null;
+    }
+  });
+
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
   const [targetSessionForModal, setTargetSessionForModal] = useState<SessionRole | null>(null);
+  const [targetSupervisorIdForModal, setTargetSupervisorIdForModal] = useState<string | null>(null);
 
-  const openSessionModal = (targetRole?: SessionRole) => {
+  const openSessionModal = (targetRole?: SessionRole, targetSupervisorId?: string) => {
     setTargetSessionForModal(targetRole || null);
+    setTargetSupervisorIdForModal(targetSupervisorId || null);
     setIsSessionModalOpen(true);
   };
+
+  const activeSupervisorName = useMemo(() => {
+    if (sessionRole !== 'supervisor') return null;
+    if (activeSupervisorId && settings.supervisors) {
+      const found = settings.supervisors.find(s => s.id === activeSupervisorId);
+      if (found) return found.name;
+    }
+    return (settings.supervisors && settings.supervisors.length > 0) ? settings.supervisors[0].name : 'المشرف';
+  }, [sessionRole, activeSupervisorId, settings.supervisors]);
 
   const permissions: RolePermissions = useMemo(() => {
     if (sessionRole === 'admin') {
       return DEFAULT_ADMIN_PERMISSIONS;
     }
     if (sessionRole === 'supervisor') {
-      return {
+      const currentSup = (settings.supervisors || []).find(s => s.id === activeSupervisorId);
+      const base: RolePermissions = {
         ...DEFAULT_SUPERVISOR_PERMISSIONS,
         ...(settings.supervisorPermissions || {}),
+        ...(currentSup?.permissions || {}),
       };
+      if (currentSup && typeof currentSup.canConfigureShifts === 'boolean') {
+        base.canConfigureShifts = currentSup.canConfigureShifts;
+      }
+      return base;
     }
     return {
       ...DEFAULT_EMPLOYEE_PERMISSIONS,
       ...(settings.employeePermissions || {}),
     };
-  }, [sessionRole, settings.supervisorPermissions, settings.employeePermissions]);
+  }, [sessionRole, activeSupervisorId, settings.supervisors, settings.supervisorPermissions, settings.employeePermissions]);
 
   const hasPermission = (action: keyof RolePermissions): boolean => {
     return !!permissions[action];
@@ -439,24 +501,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchSession = async (
     targetRole: SessionRole,
-    passwordOrPin?: string
+    passwordOrPin?: string,
+    targetSupervisorId?: string
   ): Promise<{ success: boolean; error?: string }> => {
     if (targetRole === 'employee') {
       setSessionRole('employee');
-      try { localStorage.setItem('active_session_role', 'employee'); } catch {}
+      setActiveSupervisorId(null);
+      try { 
+        localStorage.setItem('active_session_role', 'employee'); 
+        localStorage.removeItem('active_supervisor_id');
+      } catch {}
       return { success: true };
     }
 
     if (targetRole === 'supervisor') {
       const cleanPin = (passwordOrPin || '').trim();
-      const validPin = (settings.supervisorPin || '1122').trim();
       const adminPass = (currentUser?.password || '123456').trim();
+      const supervisorsList = settings.supervisors || [];
 
-      if (cleanPin && (cleanPin === validPin || cleanPin === adminPass)) {
+      // 1. If a specific supervisor was selected
+      const targetSupId = targetSupervisorId || targetSupervisorIdForModal;
+      if (targetSupId) {
+        const sup = supervisorsList.find(s => s.id === targetSupId);
+        if (sup) {
+          if (cleanPin && (cleanPin === sup.pin.trim() || cleanPin === adminPass)) {
+            setSessionRole('supervisor');
+            setActiveSupervisorId(sup.id);
+            try { 
+              localStorage.setItem('active_session_role', 'supervisor'); 
+              localStorage.setItem('active_supervisor_id', sup.id);
+            } catch {}
+            return { success: true };
+          }
+          return { success: false, error: `الرمز السري غير صحيح للمشرف (${sup.name})` };
+        }
+      }
+
+      // 2. Check if cleanPin matches any supervisor in the list
+      const matchedSup = supervisorsList.find(s => s.pin && s.pin.trim() === cleanPin);
+      if (matchedSup) {
         setSessionRole('supervisor');
-        try { localStorage.setItem('active_session_role', 'supervisor'); } catch {}
+        setActiveSupervisorId(matchedSup.id);
+        try { 
+          localStorage.setItem('active_session_role', 'supervisor'); 
+          localStorage.setItem('active_supervisor_id', matchedSup.id);
+        } catch {}
         return { success: true };
       }
+
+      // 3. Fallback to default supervisorPin or adminPass
+      const validPin = (settings.supervisorPin || '1122').trim();
+      if (cleanPin && (cleanPin === validPin || cleanPin === adminPass)) {
+        setSessionRole('supervisor');
+        const fallbackId = supervisorsList[0]?.id || null;
+        setActiveSupervisorId(fallbackId);
+        try { 
+          localStorage.setItem('active_session_role', 'supervisor'); 
+          if (fallbackId) localStorage.setItem('active_supervisor_id', fallbackId);
+        } catch {}
+        return { success: true };
+      }
+
       return { success: false, error: 'الرمز السري لجلسة المشرف غير صحيح' };
     }
 
@@ -485,10 +590,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cleanPass === '123456' || cleanPass === 'admin123' || cleanPass === 'admin'
       ) {
         setSessionRole('admin');
+        setActiveSupervisorId(null);
         if (currentUser && !currentUser.password) currentUser.password = cleanPass;
         try { 
           localStorage.setItem('active_session_role', 'admin'); 
           localStorage.setItem('last_known_account_password', cleanPass);
+          localStorage.removeItem('active_supervisor_id');
         } catch {}
         return { success: true };
       }
@@ -501,10 +608,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const data = userDocSnap.data();
             if (data?.password && String(data.password).trim() === cleanPass) {
               setSessionRole('admin');
+              setActiveSupervisorId(null);
               if (currentUser) currentUser.password = cleanPass;
               try {
                 localStorage.setItem('active_session_role', 'admin');
                 localStorage.setItem('last_known_account_password', cleanPass);
+                localStorage.removeItem('active_supervisor_id');
                 const s = localStorage.getItem('active_client_session');
                 if (s) {
                   const parsed = JSON.parse(s);
@@ -1574,14 +1683,108 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const startShift = async (startingCash: number = 0, notes: string = ''): Promise<Shift> => {
+  const addPresetShift = async (preset: Omit<PresetShift, 'id' | 'createdAt'>): Promise<PresetShift> => {
+    const newPreset: PresetShift = {
+      ...preset,
+      id: 'preset_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      createdAt: new Date().toISOString(),
+      createdBy: sessionRole === 'admin' ? 'الأدمن' : (activeSupervisorName || 'المشرف'),
+    };
+    const currentList = settings.presetShifts || [];
+    const updated = [...currentList, newPreset];
+    updateSettings({ presetShifts: updated });
+    return newPreset;
+  };
+
+  const updatePresetShift = async (id: string, updates: Partial<PresetShift>): Promise<void> => {
+    const updated = (settings.presetShifts || []).map(p => p.id === id ? { ...p, ...updates } : p);
+    updateSettings({ presetShifts: updated });
+  };
+
+  const deletePresetShift = async (id: string): Promise<void> => {
+    const updated = (settings.presetShifts || []).filter(p => p.id !== id);
+    updateSettings({ presetShifts: updated });
+  };
+
+  const addSupervisor = async (sup: Omit<StoreSupervisor, 'id' | 'createdAt'>): Promise<StoreSupervisor> => {
+    const newSup: StoreSupervisor = {
+      ...sup,
+      id: 'sup_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      createdAt: new Date().toISOString(),
+    };
+    const currentList = settings.supervisors || [];
+    const updated = [...currentList, newSup];
+    updateSettings({ supervisors: updated });
+    return newSup;
+  };
+
+  const updateSupervisor = async (id: string, updates: Partial<StoreSupervisor>): Promise<void> => {
+    const updated = (settings.supervisors || []).map(s => s.id === id ? { ...s, ...updates } : s);
+    updateSettings({ supervisors: updated });
+  };
+
+  const deleteSupervisor = async (id: string): Promise<void> => {
+    const updated = (settings.supervisors || []).filter(s => s.id !== id);
+    updateSettings({ supervisors: updated });
+    if (activeSupervisorId === id) {
+      setActiveSupervisorId(null);
+      try { localStorage.removeItem('active_supervisor_id'); } catch {}
+    }
+  };
+
+  const startShift = async (
+    startingCash: number = 0,
+    notes: string = '',
+    presetShiftId?: string,
+    shiftCode?: string
+  ): Promise<{ success: boolean; error?: string; shift?: Shift }> => {
+    const presets = settings.presetShifts || [];
+
+    if (presets.length === 0) {
+      return {
+        success: false,
+        error: 'لا توجد شفتات معدة مسبقاً في النظام. يرجى من الأدمن أو المشرف المخوّل إعداد شفت أولاً.',
+      };
+    }
+
+    if (!presetShiftId) {
+      return {
+        success: false,
+        error: 'يرجى اختيار شفت معد مسبقاً لبدء العمل.',
+      };
+    }
+
+    const selectedPreset = presets.find(p => p.id === presetShiftId);
+    if (!selectedPreset) {
+      return {
+        success: false,
+        error: 'الشفت المختار غير موجود في النظام.',
+      };
+    }
+
+    const enteredCode = (shiftCode || '').trim();
+    const correctCode = (selectedPreset.code || '').trim();
+    const adminPass = (currentUser?.password || '123456').trim();
+
+    // Verify code: matches preset code, or admin can start with admin password
+    const isCodeValid = (enteredCode && enteredCode === correctCode) || (sessionRole === 'admin' && enteredCode === adminPass);
+
+    if (!isCodeValid) {
+      return {
+        success: false,
+        error: `الرمز السري الخاص بالشفت (${selectedPreset.name}) غير صحيح.`,
+      };
+    }
+
     const now = new Date().toISOString();
     const nextNum = shifts.length > 0 ? Math.max(...shifts.map(s => s.shiftNumber || 0)) + 1 : 1;
     const newId = 'shift_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
 
-    const cashierName = currentUser?.displayName || currentUser?.storeName || (
-      sessionRole === 'admin' ? 'المدير' : sessionRole === 'supervisor' ? 'المشرف' : 'الموظف (الكاشير)'
-    );
+    const cashierName = sessionRole === 'supervisor' && activeSupervisorName
+      ? `المشرف: ${activeSupervisorName}`
+      : currentUser?.displayName || currentUser?.storeName || (
+          sessionRole === 'admin' ? 'المدير العام (أدمن)' : sessionRole === 'supervisor' ? 'المشرف' : 'الموظف (الكاشير)'
+        );
 
     const newShift: Shift = {
       id: newId,
@@ -1602,6 +1805,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalCost: 0,
       totalProfit: 0,
       itemsSold: [],
+      presetShiftId: selectedPreset.id,
+      presetShiftName: selectedPreset.name,
       notes: notes.trim(),
       createdAt: now,
     };
@@ -1619,7 +1824,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
 
     setDoc(doc(db, 'shifts', newId), sanitizeForFirestore(payload), { merge: true }).catch(() => {});
-    return newShift;
+    return { success: true, shift: newShift };
   };
 
   const endShift = async (notes?: string): Promise<Shift | null> => {
@@ -1713,6 +1918,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isStartShiftModalOpen, setIsStartShiftModalOpen,
         isEndShiftModalOpen, setIsEndShiftModalOpen,
         selectedShiftForDetails, setSelectedShiftForDetails,
+        addPresetShift, updatePresetShift, deletePresetShift,
+        addSupervisor, updateSupervisor, deleteSupervisor,
+        activeSupervisorId, activeSupervisorName,
         addProduct, addBulkProducts, updateProduct, deleteProduct, adjustStock,
         addCustomer, updateCustomer, deleteCustomer,
         createInvoice, deleteInvoice, returnInvoice, returnPartialInvoice, applyBulkPriceAdjustment,
@@ -1724,6 +1932,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sessionRole, permissions, switchSession, hasPermission,
         isSessionModalOpen, setIsSessionModalOpen,
         targetSessionForModal, setTargetSessionForModal,
+        targetSupervisorIdForModal, setTargetSupervisorIdForModal,
         openSessionModal
       }}
     >

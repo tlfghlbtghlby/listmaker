@@ -28,7 +28,8 @@ import {
   X,
   Package,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  Play
 } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { SessionBadgeButton } from './SessionBadgeButton';
@@ -82,6 +83,8 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     updateProduct,
     sessionRole,
     hasPermission,
+    activeShift,
+    setIsStartShiftModalOpen,
     draftOrders,
     activeDraftId,
     activeDraft,
@@ -559,6 +562,14 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const newCustomerDebt = previousCustomerDebt + remainingDebt;
 
   const handleSaveInvoice = (andPrint: boolean) => {
+    // شرط الرقابة: منع البيع في جلسة الموظف بدون شفت نشط
+    if (sessionRole === 'employee' && !activeShift) {
+      setCartErrorNotice('⚠️ عذراً، لا يمكن إتمام البيع في جلسة الموظف إلا بعد بدء شفت عمل جارٍ ومعد مسبقاً.');
+      setTimeout(() => setCartErrorNotice(null), 5000);
+      setIsStartShiftModalOpen(true);
+      return;
+    }
+
     if (cartItems.length === 0) {
       setCartErrorNotice('الرجاء إضافة مادة واحدة على الأقل إلى القائمة');
       setTimeout(() => setCartErrorNotice(null), 4000);
@@ -624,6 +635,31 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
   return (
     <div className="flex flex-col gap-4">
+      {/* تنبيه قفل البيع في جلسة الموظف بدون شفت نشط */}
+      {sessionRole === 'employee' && !activeShift && (
+        <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-amber-950 shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-amber-950">جلسة الموظف: البيع متوقف حالياً لعدم وجود شفت جارٍ</div>
+              <div className="text-[11px] text-amber-800">
+                لا يمكن بيع أو حفظ أي فواتير في جلسة الموظف إلا بعد بدء شفت عمل معد مسبقاً من الإدارة.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsStartShiftModalOpen(true)}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white text-xs font-black rounded-xl shadow-xs transition flex items-center gap-2 cursor-pointer whitespace-nowrap"
+          >
+            <Play className="w-4 h-4 fill-current" />
+            <span>بدء شفت معد مسبقاً الآن</span>
+          </button>
+        </div>
+      )}
+
       {isMobileMode && (
         <div className="flex items-center bg-slate-200/90 p-1 rounded-xl text-xs font-bold w-full shadow-inner">
           <button
@@ -1073,6 +1109,26 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                   </div>
                 )}
               </div>
+
+              {sessionRole === 'employee' && !activeShift && (
+                <div className="mx-3 my-2 p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 flex items-center justify-between gap-2 shadow-2xs animate-fadeIn">
+                  <div className="flex items-center gap-2 text-right">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div className="text-[11px] leading-snug">
+                      <span className="font-extrabold text-amber-900 block">يلزم بدء شفت عمل جاري لإتمام البيع</span>
+                      <span className="text-[10px] text-amber-800">اختر شفت معد مسبقاً وادخل رمزه الخاص</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsStartShiftModalOpen(true)}
+                    className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>بدء الشفت</span>
+                  </button>
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[520px] lg:max-h-[calc(100vh-320px)]">
                 {cartItems.length === 0 ? (
@@ -1637,11 +1693,19 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                     type="button"
                     disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                     onClick={() => handleSaveInvoice(true)}
-                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
-                    title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة'}
+                    className={`py-2.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer ${
+                      sessionRole === 'employee' && !activeShift 
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400' 
+                        : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white'
+                    }`}
+                    title={
+                      sessionRole === 'employee' && !activeShift 
+                        ? 'يلزم بدء شفت عمل قبل إتمام البيع' 
+                        : (saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة')
+                    }
                   >
                     <Printer className="w-4 h-4" />
-                    <span>حفظ وطباعة القائمة</span>
+                    <span>{sessionRole === 'employee' && !activeShift ? 'بدء شفت وإتمام' : 'حفظ وطباعة القائمة'}</span>
                   </button>
 
                   <button
@@ -1649,7 +1713,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                     disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
                     onClick={() => handleSaveInvoice(false)}
                     className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                    title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط دون طباعة'}
+                    title={
+                      sessionRole === 'employee' && !activeShift 
+                        ? 'يلزم بدء شفت عمل قبل إتمام البيع' 
+                        : (saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط دون طباعة')
+                    }
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>حفظ فقط</span>

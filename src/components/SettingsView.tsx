@@ -37,8 +37,14 @@ import {
   UserCheck,
   Package,
   PackageCheck,
-  PackagePlus
+  PackagePlus,
+  Clock,
+  Plus,
+  Edit2,
+  X,
+  UserPlus
 } from 'lucide-react';
+import { PresetShift, StoreSupervisor } from '../types';
 import { QuickAddItemsSection } from './QuickAddItemsSection';
 import { ExportBackupModal } from './ExportBackupModal';
 import { WipeProductsModal } from './WipeProductsModal';
@@ -73,7 +79,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     products,
     applyBulkPriceAdjustment,
     sessionRole,
-    openSessionModal
+    openSessionModal,
+    hasPermission,
+    addPresetShift,
+    updatePresetShift,
+    deletePresetShift,
+    addSupervisor,
+    updateSupervisor,
+    deleteSupervisor
   } = useApp();
 
   const [storeName, setStoreName] = useState(settings.storeName);
@@ -175,6 +188,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [isImportingProductsOnly, setIsImportingProductsOnly] = useState(false);
 
+  // Multiple supervisors management
+  const [isAddingSupervisor, setIsAddingSupervisor] = useState(false);
+  const [newSupName, setNewSupName] = useState('');
+  const [newSupPin, setNewSupPin] = useState('');
+  const [newSupCanConfigure, setNewSupCanConfigure] = useState(true);
+  const [editingSupId, setEditingSupId] = useState<string | null>(null);
+  const [editSupName, setEditSupName] = useState('');
+  const [editSupPin, setEditSupPin] = useState('');
+  const [editSupCanConfigure, setEditSupCanConfigure] = useState(true);
+
+  // Preset shifts management
+  const [isAddingPresetShift, setIsAddingPresetShift] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [newPresetCode, setNewPresetCode] = useState('');
+  const [newPresetNotes, setNewPresetNotes] = useState('');
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [editPresetName, setEditPresetName] = useState('');
+  const [editPresetCode, setEditPresetCode] = useState('');
+  const [editPresetNotes, setEditPresetNotes] = useState('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const productsOnlyFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -216,6 +249,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     });
     setSessionsNotice('تم حفظ الرمز السري للمشرف والصلاحيات بنجاح!');
     setTimeout(() => setSessionsNotice(null), 3500);
+  };
+
+  const handleAddSupervisorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSupName.trim() || !newSupPin.trim()) {
+      setSessionsNotice('⚠️ يرجى إدخال اسم المشرف والرمز السري الخاص به');
+      setTimeout(() => setSessionsNotice(null), 4000);
+      return;
+    }
+    await addSupervisor({
+      name: newSupName.trim(),
+      pin: newSupPin.trim(),
+      canConfigureShifts: newSupCanConfigure,
+    });
+    setNewSupName('');
+    setNewSupPin('');
+    setNewSupCanConfigure(true);
+    setIsAddingSupervisor(false);
+    setSessionsNotice('✅ تمت إضافة المشرف بنجاح وتخصيص رمزه السري.');
+    setTimeout(() => setSessionsNotice(null), 4000);
+  };
+
+  const handleEditSupervisorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSupId || !editSupName.trim() || !editSupPin.trim()) return;
+    await updateSupervisor(editingSupId, {
+      name: editSupName.trim(),
+      pin: editSupPin.trim(),
+      canConfigureShifts: editSupCanConfigure,
+    });
+    setEditingSupId(null);
+    setSessionsNotice('✅ تم تعديل بيانات المشرف ورمزه وصلاحياته بنجاح.');
+    setTimeout(() => setSessionsNotice(null), 4000);
+  };
+
+  const handleAddPresetShiftSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPresetName.trim() || !newPresetCode.trim()) {
+      setSessionsNotice('⚠️ يرجى إدخال اسم الشفت والرمز السري لبدئه');
+      setTimeout(() => setSessionsNotice(null), 4000);
+      return;
+    }
+    await addPresetShift({
+      name: newPresetName.trim(),
+      code: newPresetCode.trim(),
+      notes: newPresetNotes.trim(),
+    });
+    setNewPresetName('');
+    setNewPresetCode('');
+    setNewPresetNotes('');
+    setIsAddingPresetShift(false);
+    setSessionsNotice('✅ تمت إضافة قالب الشفت المسبق بنجاح.');
+    setTimeout(() => setSessionsNotice(null), 4000);
+  };
+
+  const handleEditPresetShiftSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPresetId || !editPresetName.trim() || !editPresetCode.trim()) return;
+    await updatePresetShift(editingPresetId, {
+      name: editPresetName.trim(),
+      code: editPresetCode.trim(),
+      notes: editPresetNotes.trim(),
+    });
+    setEditingPresetId(null);
+    setSessionsNotice('✅ تم تعديل بيانات الشفت المسبق بنجاح.');
+    setTimeout(() => setSessionsNotice(null), 4000);
   };
 
   const handleApplyBulkPrices = async () => {
@@ -1572,6 +1671,452 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
               </div>
             </div>
           </div>
+
+          {/* Multiple Supervisors Section (إدارة المشرفين المتعددين) */}
+          {sessionRole === 'admin' && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      إدارة المشرفين المتعددين (Supervisors)
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      إمكانية إضافة أكثر من مشرف ولكل مشرف اسمه ورمزه الخاص، مع خيار منحه صلاحية إعداد الشفتات وتظهر جلساتهم في زر اختيار الجلسة.
+                    </p>
+                  </div>
+                </div>
+
+                {!isAddingSupervisor && !editingSupId && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingSupervisor(true)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>إضافة مشرف جديد</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Add New Supervisor Form */}
+              {isAddingSupervisor && (
+                <form onSubmit={handleAddSupervisorSubmit} className="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-blue-200/80 pb-2">
+                    <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                      <UserPlus className="w-4 h-4 text-blue-600" />
+                      إضافة مشرف جديد للنظام
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingSupervisor(false)}
+                      className="text-blue-700 hover:text-blue-900 text-xs font-bold"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">اسم المشرف:</label>
+                      <input
+                        type="text"
+                        value={newSupName}
+                        onChange={(e) => setNewSupName(e.target.value)}
+                        placeholder="مثال: المشرف أحمد"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">الرمز السري للمشرف (PIN):</label>
+                      <input
+                        type="text"
+                        value={newSupPin}
+                        onChange={(e) => setNewSupPin(e.target.value)}
+                        placeholder="مثال: 5566"
+                        className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 p-2 bg-white rounded-lg border border-blue-200 cursor-pointer text-xs font-bold text-blue-950">
+                    <input
+                      type="checkbox"
+                      checked={newSupCanConfigure}
+                      onChange={(e) => setNewSupCanConfigure(e.target.checked)}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span>السماح لهذا المشرف بإعداد وتعديل قوالب الشفتات المسبقة</span>
+                  </label>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingSupervisor(false)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      حفظ المشرف
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Edit Supervisor Form */}
+              {editingSupId && (
+                <form onSubmit={handleEditSupervisorSubmit} className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                    <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                      <Edit2 className="w-4 h-4 text-amber-600" />
+                      تعديل بيانات المشرف
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingSupId(null)}
+                      className="text-amber-700 hover:text-amber-900 text-xs font-bold"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">اسم المشرف:</label>
+                      <input
+                        type="text"
+                        value={editSupName}
+                        onChange={(e) => setEditSupName(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">الرمز السري (PIN):</label>
+                      <input
+                        type="text"
+                        value={editSupPin}
+                        onChange={(e) => setEditSupPin(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 p-2 bg-white rounded-lg border border-amber-200 cursor-pointer text-xs font-bold text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={editSupCanConfigure}
+                      onChange={(e) => setEditSupCanConfigure(e.target.checked)}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span>السماح لهذا المشرف بإعداد وتعديل قوالب الشفتات المسبقة</span>
+                  </label>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditingSupId(null)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      حفظ التعديلات
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Supervisors List */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {(settings.supervisors || []).map((sup) => (
+                  <div
+                    key={sup.id}
+                    className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3 hover:border-blue-300 hover:bg-blue-50/20 transition shadow-2xs"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                          <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                          {sup.name}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200">
+                          رمز: {sup.pin}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-1">
+                        {sup.canConfigureShifts ? (
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-md border border-emerald-200">
+                            ✓ مخوّل بإعداد الشفتات
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-2 py-0.5 rounded-md">
+                            بدون صلاحية إعداد شفتات
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-200/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSupId(sup.id);
+                          setEditSupName(sup.name);
+                          setEditSupPin(sup.pin);
+                          setEditSupCanConfigure(!!sup.canConfigureShifts);
+                        }}
+                        className="px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-blue-700 hover:bg-white rounded transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>تعديل</span>
+                      </button>
+                      {(settings.supervisors || []).length > 1 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm(`هل أنت متأكد من حذف المشرف (${sup.name})؟`)) {
+                              await deleteSupervisor(sup.id);
+                            }
+                          }}
+                          className="px-2 py-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>حذف</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Preset Shifts Management Section (إعداد الشفتات المسبقة) */}
+          {(sessionRole === 'admin' || hasPermission('canConfigureShifts')) && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      قوالب الشفتات المعدة مسبقاً (Preset Shifts)
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      كل شفت له اسمه ورمزه السري الخاص لبدئه، ولا يمكن البيع في جلسة الموظف إلا بعد بدء أحد هذه الشفتات.
+                    </p>
+                  </div>
+                </div>
+
+                {!isAddingPresetShift && !editingPresetId && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingPresetShift(true)}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة شفت مسبق جديد</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Add New Preset Shift Form */}
+              {isAddingPresetShift && (
+                <form onSubmit={handleAddPresetShiftSubmit} className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-indigo-200/80 pb-2">
+                    <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                      <Plus className="w-4 h-4 text-indigo-600" />
+                      إضافة شفت عمل جديد
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingPresetShift(false)}
+                      className="text-indigo-700 hover:text-indigo-900 text-xs font-bold"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">اسم الشفت:</label>
+                      <input
+                        type="text"
+                        value={newPresetName}
+                        onChange={(e) => setNewPresetName(e.target.value)}
+                        placeholder="مثال: شفت الصباح - كاشير 1"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">الرمز السري للشفت (PIN):</label>
+                      <input
+                        type="text"
+                        value={newPresetCode}
+                        onChange={(e) => setNewPresetCode(e.target.value)}
+                        placeholder="مثال: 1234"
+                        className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات (اختياري):</label>
+                      <input
+                        type="text"
+                        value={newPresetNotes}
+                        onChange={(e) => setNewPresetNotes(e.target.value)}
+                        placeholder="مثال: الصالة الرئيسية"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingPresetShift(false)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      حفظ قالب الشفت
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Edit Preset Shift Form */}
+              {editingPresetId && (
+                <form onSubmit={handleEditPresetShiftSubmit} className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                    <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                      <Edit2 className="w-4 h-4 text-amber-600" />
+                      تعديل بيانات الشفت
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingPresetId(null)}
+                      className="text-amber-700 hover:text-amber-900 text-xs font-bold"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">اسم الشفت:</label>
+                      <input
+                        type="text"
+                        value={editPresetName}
+                        onChange={(e) => setEditPresetName(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">الرمز السري للشفت (PIN):</label>
+                      <input
+                        type="text"
+                        value={editPresetCode}
+                        onChange={(e) => setEditPresetCode(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات (اختياري):</label>
+                      <input
+                        type="text"
+                        value={editPresetNotes}
+                        onChange={(e) => setEditPresetNotes(e.target.value)}
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditingPresetId(null)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                    >
+                      حفظ التعديلات
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Presets List */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {(settings.presetShifts || []).map((preset) => (
+                  <div
+                    key={preset.id}
+                    className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3 hover:border-indigo-300 hover:bg-indigo-50/20 transition shadow-2xs"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-slate-900">{preset.name}</span>
+                        <span className="text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-200">
+                          رمز: {preset.code}
+                        </span>
+                      </div>
+                      {preset.notes && (
+                        <p className="text-[11px] text-slate-500 mt-1">{preset.notes}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-200/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPresetId(preset.id);
+                          setEditPresetName(preset.name);
+                          setEditPresetCode(preset.code);
+                          setEditPresetNotes(preset.notes || '');
+                        }}
+                        className="px-2 py-1 text-[11px] font-bold text-slate-600 hover:text-indigo-700 hover:bg-white rounded transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>تعديل</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.confirm(`هل أنت متأكد من حذف قالب الشفت (${preset.name})؟`)) {
+                            await deletePresetShift(preset.id);
+                          }
+                        }}
+                        className="px-2 py-1 text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded transition flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>حذف</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Permissions Matrix: Employee vs Supervisor */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
