@@ -107,7 +107,7 @@ const MainContent: React.FC = () => {
     }
   };
 
-  // تنفيذ الطباعة الصامتة المباشرة لمرة واحدة فقط
+  // تنفيذ الطباعة الصامتة اللحظية المباشرة (دون أي انتظار زمني)
   useEffect(() => {
     if (!directInvoice || isPrintingRef.current) return;
 
@@ -115,12 +115,6 @@ const MainContent: React.FC = () => {
     let isMounted = true;
 
     const executeSilentPrint = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      if (!isMounted) {
-        isPrintingRef.current = false;
-        return;
-      }
-
       const paperSize = settings.printerPaperSize || (settings.printFormat === 'thermal' ? 'thermal80' : 'a4');
       const pageSize = paperSize === 'a4' ? 'A4' : paperSize === 'thermal58' ? '58mm' : '80mm';
 
@@ -131,20 +125,25 @@ const MainContent: React.FC = () => {
           if (typeof electronBridge.printDirect === 'function') {
             await electronBridge.printDirect({
               silent: true,
+              deviceName: (settings as any).selectedPrinterName || '', // إرسال مباشر للطابعة المحددة بالاسم
               paperSize,
               pageSize,
             });
           } else if (typeof electronBridge.printSilent === 'function') {
-            await electronBridge.printSilent(paperSize);
+            await electronBridge.printSilent({
+              silent: true,
+              deviceName: (settings as any).selectedPrinterName || '',
+              paperSize,
+            });
           }
         } catch (err) {
-          console.error('فشل في تنفيذ الطباعة الصامتة المباشرة:', err);
+          console.error('فشل في تنفيذ الطباعة اللحظية المباشرة:', err);
         } finally {
           if (isMounted) {
             setDirectInvoice(null);
             setTimeout(() => {
               isPrintingRef.current = false;
-            }, 800);
+            }, 80); // تحرير سريع للقفل
           }
         }
       } else {
@@ -162,7 +161,7 @@ const MainContent: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [directInvoice, settings.printerPaperSize, settings.printFormat]);
+  }, [directInvoice, settings.printerPaperSize, settings.printFormat, (settings as any).selectedPrinterName]);
 
   if (authLoading) {
     return (
@@ -268,142 +267,4 @@ const MainContent: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('shifts')}
-                  className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
-                  title="عرض سجل الشفتات وساعات العمل"
-                >
-                  <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>الشفتات</span>
-                  {activeShift && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  )}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setActiveTab('customers')}
-                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
-                title="عرض حسابات ديون العملاء والبيع الآجل"
-              >
-                <Users className="w-3.5 h-3.5 text-slate-500" />
-                <span>الديون والعملاء</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('reports')}
-                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
-                title="عرض الأرباح والتقارير المالية"
-              >
-                <BarChart3 className="w-3.5 h-3.5 text-slate-500" />
-                <span>التقارير</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('settings')}
-                className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-700 font-semibold transition flex items-center gap-1 cursor-pointer"
-                title="فتح إعدادات النظام والنسخ الاحتياطي"
-              >
-                <Settings className="w-3.5 h-3.5 text-slate-500" />
-                <span>الإعدادات</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'pos' && (
-          <POSView
-            onInvoiceCreated={handleInvoiceCreated}
-            onOpenNewProduct={handleOpenNewProduct}
-            onEditProduct={handleOpenEditProduct}
-            onOpenSettings={() => setActiveTab('settings')}
-          />
-        )}
-
-        {activeTab === 'inventory' && (
-          <InventoryView
-            onOpenNewProduct={handleOpenNewProduct}
-            onEditProduct={handleOpenEditProduct}
-            onOpenQuickAdd={() => {
-              setSettingsInitialTab('quick-add');
-              setActiveTab('settings');
-            }}
-          />
-        )}
-
-        {activeTab === 'invoices' && (
-          <InvoicesView
-            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
-          />
-        )}
-
-        {activeTab === 'shifts' && (
-          <ShiftsView
-            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
-          />
-        )}
-
-        {activeTab === 'customers' && (
-          <CustomersView
-            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
-          />
-        )}
-
-        {activeTab === 'reports' && (
-          <ReportsView />
-        )}
-
-        {activeTab === 'settings' && (
-          <SettingsView initialTab={settingsInitialTab} />
-        )}
-      </main>
-
-      <ProductModal
-        isOpen={isProductModalOpen}
-        productToEdit={productToEdit}
-        initialCode={initialBarcodeForNewProduct}
-        onClose={() => {
-          setIsProductModalOpen(false);
-          setProductToEdit(null);
-          setInitialBarcodeForNewProduct(undefined);
-        }}
-      />
-
-      <InvoicePrintModal
-        invoice={invoiceToPrint}
-        onClose={() => setInvoiceToPrint(null)}
-      />
-
-      <SessionSwitchModal />
-
-      <StartShiftModal />
-
-      <EndShiftModal onNavigateToShifts={() => setActiveTab('shifts')} />
-
-      <ShiftDetailsModal
-        shift={selectedShiftForDetails}
-        onClose={() => setSelectedShiftForDetails(null)}
-        onViewInvoice={(inv) => setInvoiceToPrint(inv)}
-      />
-
-      {directInvoice && (
-        <div
-          id="direct-print-offscreen-container"
-          aria-hidden="true"
-          className="fixed -left-[9999px] -top-[9999px] opacity-0 pointer-events-none direct-print-offscreen print:opacity-100 print:pointer-events-auto print:static print:left-auto print:top-auto print:block"
-        >
-          <InvoicePrintModal
-            invoice={directInvoice}
-            onClose={() => setDirectInvoice(null)}
-          />
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default function App() {
-  return (
-    <AppProvider>
-      <MainContent />
-    </AppProvider>
-  );
-}
+                  className="px-2.5 py-1 rounded-lg hover:
