@@ -5,19 +5,13 @@ import {
   Zap,
   CheckCircle2,
   AlertCircle,
-  Copy,
   Trash2,
   Eye,
   Cloud,
-  Layers,
-  ArrowRight,
   Info,
   Sparkles,
   Barcode,
-  Package,
-  TrendingUp,
-  RefreshCw,
-  Plus
+  RefreshCw
 } from 'lucide-react';
 
 export interface ParsedQuickItem {
@@ -70,7 +64,7 @@ const SAMPLE_TEXT = `بيض, 12, 6000, 72000, 6500, 78000, 1ك
 معجون أسنان كولجيت, 12, 1000, 12000, 1500, 18000, 20ق, 0, 0, 629100123456`;
 
 export const QuickAddItemsSection: React.FC = () => {
-  const { products, addBulkProducts, formatMoney, setSyncNotice } = useApp();
+  const { products, addBulkProducts, formatMoney, setSyncNotice, currentUser } = useApp();
 
   const [rawText, setRawText] = useState('');
   const [parsedItems, setParsedItems] = useState<ParsedQuickItem[]>([]);
@@ -153,7 +147,6 @@ export const QuickAddItemsSection: React.FC = () => {
 
       if (rawStockStr) {
         const isCarton = /[كk]|كرتون/i.test(rawStockStr);
-        // Extract numeric portion
         const numMatch = rawStockStr.replace(/[^\d.]/g, '');
         const numVal = parseFloat(numMatch) || 0;
 
@@ -267,7 +260,9 @@ export const QuickAddItemsSection: React.FC = () => {
     setIsUploading(true);
     setUploadProgress({ current: 0, total: validItems.length });
 
-    // Map each valid parsed item into a Product object
+    const currentUid = currentUser?.uid || '';
+
+    // إسناد ownerUid مباشرة مع الكائنات المحفوظة لمطابقة الاستعلام المفلتر
     const itemsToSave: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[] = validItems.map((item) => ({
       name: item.name.trim(),
       code: item.barcode.trim(),
@@ -280,6 +275,7 @@ export const QuickAddItemsSection: React.FC = () => {
       piecesPerCarton: item.piecesPerBox,
       minStock: Math.max(5, Math.round(item.piecesPerBox / 2)),
       notes: `إضافة سريعة (${item.stockInput})`,
+      ownerUid: currentUid,
     }));
 
     try {
@@ -310,7 +306,6 @@ export const QuickAddItemsSection: React.FC = () => {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden space-y-6 p-5 sm:p-6">
-      
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="flex items-center gap-3">
@@ -517,7 +512,6 @@ export const QuickAddItemsSection: React.FC = () => {
       {/* Preview Table Section */}
       {hasPreviewed && parsedItems.length > 0 && (
         <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs space-y-3 pt-3 bg-slate-50/50">
-          
           <div className="px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
@@ -704,10 +698,8 @@ export const QuickAddItemsSection: React.FC = () => {
               )}
             </button>
           </div>
-
         </div>
       )}
-
     </div>
   );
 };
