@@ -663,7 +663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // المزامنة الحية المفلترة من جهة السيرفر
+  // المزامنة الحية المفلترة سحابياً من جهة السيرفر لمنع استنزاف القراءات
   useEffect(() => {
     if (!currentUser) {
       setProducts([]);
@@ -694,7 +694,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // 1. استعلام مفلتر للمواد على مستوى السيرفر (يمنع سحب مخازن العملاء الآخرين ويقلل القراءات بنسبة 95%)
+    // 1. استعلام مفلتر للمواد على مستوى السيرفر[cite: 5]
     const itemsQuery = isMuntazar 
       ? query(collection(db, 'items'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'items'), where('ownerUid', '==', currentUid));
@@ -732,7 +732,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsCloudConnected(false);
     });
 
-    // 2. استعلام مفلتر للفواتير على مستوى السيرفر
+    // 2. استعلام مفلتر للفواتير على مستوى السيرفر[cite: 5]
     const invoicesQuery = isMuntazar
       ? query(collection(db, 'invoices'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'invoices'), where('ownerUid', '==', currentUid));
@@ -750,7 +750,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, () => {});
 
-    // 3. استعلام مفلتر للزبائن على مستوى السيرفر
+    // 3. استعلام مفلتر للزبائن على مستوى السيرفر[cite: 5]
     const customersQuery = isMuntazar
       ? query(collection(db, 'customers'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'customers'), where('ownerUid', '==', currentUid));
@@ -783,7 +783,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }, () => {});
 
-    // 5. استعلام مفلتر للشفتات على مستوى السيرفر
+    // 5. استعلام مفلتر للشفتات على مستوى السيرفر[cite: 5]
     const shiftsQuery = isMuntazar
       ? query(collection(db, 'shifts'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'shifts'), where('ownerUid', '==', currentUid));
@@ -818,7 +818,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [currentUser]);
 
-  // رفع فعلي لكامل المنتجات غير المرفوعة بنظام دفعات آمن
+  // رفع فعلي لكامل المنتجات بنظام دفعات ذكي وموفر للعمليات
   const syncNow = async () => {
     if (!currentUser) return;
     setIsSyncing(true);
@@ -882,17 +882,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newProduct;
   };
 
+  // ✅ تصحيح addBulkProducts لاستخدام writeBatch دفعة واحدة بدلاً من إرسال طلب لكل مادة
   const addBulkProducts = async (itemsData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[], onProgress?: (curr: number, total: number) => void) => {
     const now = new Date().toISOString();
     const created: Product[] = [];
+    const currentUid = currentUser?.uid || '';
+    const batchSize = 400;
+
     for (let i = 0; i < itemsData.length; i++) {
       const item = itemsData[i];
       const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + i;
-      const full: any = { ...item, id: newId, ownerUid: currentUser?.uid || '', createdAt: now, updatedAt: now };
+      const full: any = { 
+        ...item, 
+        id: newId, 
+        ownerUid: (item as any).ownerUid || currentUid, 
+        createdAt: now, 
+        updatedAt: now 
+      };
       created.push(full);
-      setDoc(doc(db, 'items', newId), sanitizeForFirestore(full), { merge: true }).catch(() => {});
-      if (onProgress) onProgress(i + 1, itemsData.length);
     }
+
+    try {
+      for (let i = 0; i < created.length; i += batchSize) {
+        const chunk = created.slice(i, i + batchSize);
+        const batch = writeBatch(db);
+        chunk.forEach(prod => {
+          const ref = doc(db, 'items', prod.id);
+          batch.set(ref, sanitizeForFirestore(prod), { merge: true });
+        });
+        await batch.commit();
+        if (onProgress) onProgress(Math.min(i + batchSize, created.length), created.length);
+      }
+    } catch (e) {
+      console.warn('Batch write error in addBulkProducts:', e);
+    }
+
     setProducts(prev => {
       const updated = [...created, ...prev];
       try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
