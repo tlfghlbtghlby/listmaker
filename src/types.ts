@@ -1,6 +1,6 @@
 export type SaleType = 'direct' | 'credit'; // بيع مباشر (نقدي) أو بيع آجل (دين)
 export type PriceType = 'retail' | 'wholesale'; // سعر البيع العادي أو سعر الجملة
-export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'returned';
+export type InvoiceStatus = 'paid' | 'partial' | 'unpaid' | 'returned' | 'partially_returned';
 
 export interface Product {
   id: string;
@@ -15,6 +15,7 @@ export interface Product {
   piecesPerCarton?: number; // كم يحتوي الكارتون الواحد من قطع (مثال: 6 قطع في الكارتون)
   minStock: number; // الحد الأدنى للتنبيه عند قرب النفاد
   notes?: string;
+  ownerUid?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,9 +44,27 @@ export interface InvoiceItem {
   deductedPieces?: number; // إجمالي القطع المخصومة من رصيد المخزن
   costPrice: number; // سعر الشراء لحساب الربح
   unitPrice: number; // سعر البيع للوحدة
-  quantity: number; // الكمية
+  quantity: number; // الكمية الأصلية المباعة
+  returnedQuantity?: number; // الكمية المسترجعة من هذا البند
   total: number; // المجموع للسطر
   isCustomPrice?: boolean; // تم تعديل السعر في هذه القائمة فقط
+}
+
+// سجل توثيق عملية استرجاع مادة معينة من القائمة مع السبب
+export interface ReturnedItemRecord {
+  id: string;
+  productId: string;
+  productName: string;
+  code: string;
+  unit: string;
+  quantity: number; // الكمية المسترجعة في هذه العملية
+  unitPrice: number; // سعر البيع وقت الشراء
+  costPrice: number; // سعر التكلفة
+  refundAmount: number; // المبلغ الإجمالي المخصوم لهذه المادة (quantity * unitPrice)
+  reason: string; // سبب الاسترجاع (خانة السبب المطلوبة)
+  notes?: string; // ملاحظات إضافية
+  returnedAt: string; // تاريخ ووقت العملية
+  returnedBy?: string; // منفذ العملية
 }
 
 export interface Invoice {
@@ -58,7 +77,7 @@ export interface Invoice {
   items: InvoiceItem[];
   subtotal: number;
   discount: number; // خصم نقدي
-  total: number; // المبلغ الإجمالي المطلوب
+  total: number; // المبلغ الإجمالي المطلوب (بعد خصم المرتجعات إن وجدت)
   paidAmount: number; // المبلغ المسدد حالياً
   remainingAmount: number; // المبلغ المتبقي (آجل)
   previousDebt: number; // دين الزبون السابق قبل هذه الفاتورة
@@ -70,6 +89,9 @@ export interface Invoice {
   totalCost: number; // تكلفة البضاعة المباعة
   netProfit: number; // صافي الربح المحقق (total - totalCost - discount)
   shiftId?: string; // معرف الشفت المرتبط بهذه الفاتورة
+  returnedItems?: ReturnedItemRecord[]; // سجل المواد المرتجعة مع أسبابها
+  totalReturnedAmount?: number; // إجمالي المبالغ المسترجعة
+  isPartiallyReturned?: boolean; // وسم يوضح إذا كانت القائمة مسترجعة جزئياً
 }
 
 export interface ShiftItemSold {

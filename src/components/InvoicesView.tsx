@@ -15,8 +15,10 @@ import {
   CheckCircle,
   AlertCircle,
   RotateCcw,
-  Undo2
+  Undo2,
+  PackageMinus
 } from 'lucide-react';
+import { PartialReturnModal } from './PartialReturnModal';
 
 interface InvoicesViewProps {
   onViewInvoice: (invoice: Invoice) => void;
@@ -29,6 +31,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
   const [typeFilter, setTypeFilter] = useState<'all' | 'direct' | 'credit' | 'unpaid' | 'returned'>('all');
   const [returningId, setReturningId] = useState<string | null>(null);
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [selectedInvoiceForPartialReturn, setSelectedInvoiceForPartialReturn] = useState<Invoice | null>(null);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
@@ -43,7 +46,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
       if (typeFilter === 'direct') matchType = inv.type === 'direct';
       else if (typeFilter === 'credit') matchType = inv.type === 'credit';
       else if (typeFilter === 'unpaid') matchType = inv.remainingAmount > 0 && inv.status !== 'returned';
-      else if (typeFilter === 'returned') matchType = inv.status === 'returned';
+      else if (typeFilter === 'returned') matchType = inv.status === 'returned' || !!inv.isPartiallyReturned || inv.status === 'partially_returned';
 
       return matchSearch && matchType;
     });
@@ -212,7 +215,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                 : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
             }`}
           >
-            مرتجعة ({invoices.filter((i) => i.status === 'returned').length})
+            مرتجعة / جزئية ({invoices.filter((i) => i.status === 'returned' || !!i.isPartiallyReturned || i.status === 'partially_returned').length})
           </button>
         </div>
 
@@ -280,11 +283,19 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                     <tr key={inv.id} className="hover:bg-slate-50/70 transition">
                       {/* Invoice # */}
                       <td className="py-3 px-4 font-mono font-bold text-slate-800 text-xs">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span>{inv.invoiceNumber}</span>
                           {inv.status === 'returned' && (
                             <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-black">
-                              مرتجعة
+                              مرتجعة بالكامل
+                            </span>
+                          )}
+                          {(inv.isPartiallyReturned || inv.status === 'partially_returned') && (
+                            <span 
+                              className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-300 text-[10px] font-black"
+                              title={inv.totalReturnedAmount ? `تم استرجاع مواد بقيمة ${formatMoney(inv.totalReturnedAmount)}` : 'تم استرجاع مواد جزئياً'}
+                            >
+                              مرتجعة جزئياً
                             </span>
                           )}
                         </div>
@@ -323,12 +334,17 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
 
                       {/* Items count */}
                       <td className="py-3 px-4 text-xs text-slate-500">
-                        {inv.items.length} مواد ({inv.items.reduce((s, i) => s + i.quantity, 0)} قطعة)
+                        {inv.items.length} مواد ({inv.items.reduce((s, i) => s + (i.quantity - (i.returnedQuantity || 0)), 0)} قطعة متبقية)
                       </td>
 
                       {/* Total */}
                       <td className="py-3 px-4 font-extrabold text-slate-900">
-                        {formatMoney(inv.total)}
+                        <div>{formatMoney(inv.total)}</div>
+                        {inv.totalReturnedAmount && inv.totalReturnedAmount > 0 ? (
+                          <div className="text-[10px] text-indigo-700 font-normal">
+                            (مسترجع: {formatMoney(inv.totalReturnedAmount)})
+                          </div>
+                        ) : null}
                       </td>
 
                       {/* Paid */}
@@ -357,20 +373,40 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => onViewInvoice(inv)}
-                            className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition"
+                            className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer"
                             title="معاينة وطباعة القائمة"
                           >
                             <Printer className="w-4 h-4" />
                           </button>
 
-                          {/* زر إرجاع المشتريات / القائمة (للمصرح لهم فقط) */}
+                          {/* زر استرجاع جزئي للمواد مع خانة السبب (للمشرفين والمدير) */}
+                          {hasPermission('canReturnInvoice') && (
+                            inv.status !== 'returned' ? (
+                              <button
+                                onClick={() => setSelectedInvoiceForPartialReturn(inv)}
+                                className="p-1.5 rounded-lg text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition cursor-pointer flex items-center gap-1"
+                                title="استرجاع جزئي لمواد محددة مع تحديد السبب"
+                              >
+                                <PackageMinus className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span 
+                                className="p-1.5 text-slate-300 cursor-not-allowed" 
+                                title="تم إرجاع كامل القائمة"
+                              >
+                                <PackageMinus className="w-4 h-4" />
+                              </span>
+                            )
+                          )}
+
+                          {/* زر إرجاع كامل المشتريات / القائمة (للمصرح لهم فقط) */}
                           {hasPermission('canReturnInvoice') && (
                             inv.status !== 'returned' ? (
                               <button
                                 disabled={returningId === inv.id}
                                 onClick={() => handleReturn(inv)}
-                                className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 transition flex items-center gap-1"
-                                title="إرجاع القائمة واسترداد المواد للمخزن (في حال تخلى الزبون عن الشراء)"
+                                className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 transition cursor-pointer flex items-center gap-1"
+                                title="إرجاع كامل القائمة واسترداد المواد للمخزن"
                               >
                                 <RotateCcw className={`w-4 h-4 ${returningId === inv.id ? 'animate-spin' : ''}`} />
                               </button>
@@ -388,7 +424,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
                           {hasPermission('canDeleteInvoice') && (
                             <button
                               onClick={() => handleDelete(inv)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                               title="إلغاء وحذف القائمة نهائياً"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -405,6 +441,17 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({ onViewInvoice }) => 
           </table>
         </div>
       </div>
+
+      {/* نافذة الاسترجاع الجزئي للقوائم */}
+      <PartialReturnModal
+        invoice={selectedInvoiceForPartialReturn}
+        isOpen={!!selectedInvoiceForPartialReturn}
+        onClose={() => setSelectedInvoiceForPartialReturn(null)}
+        onSuccess={() => {
+          setFeedbackNotice('تم استرجاع المواد المحددة وتسوية الحسابات والمخزن بنجاح!');
+          setTimeout(() => setFeedbackNotice(null), 4000);
+        }}
+      />
 
     </div>
   );

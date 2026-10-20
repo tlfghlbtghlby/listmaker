@@ -12,10 +12,12 @@ import {
   Bluetooth, 
   RefreshCw, 
   Info, 
-  ArrowDownAZ 
+  ArrowDownAZ,
+  PackageMinus
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import { PartialReturnModal } from './PartialReturnModal';
 
 interface InvoicePrintModalProps {
   invoice: Invoice | null;
@@ -33,7 +35,7 @@ const StarburstSeal: React.FC<{ text: string }> = ({ text }) => (
 );
 
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
-  const { settings } = useApp();
+  const { settings, hasPermission } = useApp();
   const [printLayout, setPrintLayout] = useState<'a4' | 'a5' | 'thermal80' | 'thermal58'>(
     settings.printFormat === 'thermal58'
       ? 'thermal58'
@@ -47,6 +49,7 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  const [isPartialReturnOpen, setIsPartialReturnOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -453,6 +456,19 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               <span>واتساب (PDF)</span>
             </button>
 
+            {/* زر استرجاع جزئي للقائمة */}
+            {hasPermission('canReturnInvoice') && invoice.status !== 'returned' && (
+              <button
+                type="button"
+                onClick={() => setIsPartialReturnOpen(true)}
+                className="px-3.5 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                title="استرجاع جزئي لمواد محددة من هذه القائمة مع ذكر السبب"
+              >
+                <PackageMinus className="w-3.5 h-3.5 text-indigo-600" />
+                <span>استرجاع جزئي</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onClose}
@@ -528,10 +544,20 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 </div>
 
                 {/* Metadata Bar */}
-                <div className="border border-black rounded-md px-3 py-1.5 flex items-center justify-between text-xs font-bold text-black">
+                <div className="border border-black rounded-md px-3 py-1.5 flex items-center justify-between text-xs font-bold text-black flex-wrap gap-2">
                   <div className="flex items-center gap-1.5">
                     <span>رقم القائمة:</span>
                     <span className="font-mono text-sm underline">{invoice.invoiceNumber}</span>
+                    {invoice.status === 'returned' && (
+                      <span className="px-1.5 py-0.5 rounded bg-black text-white text-[10px] font-black mr-1">
+                        مرتجعة بالكامل
+                      </span>
+                    )}
+                    {(invoice.isPartiallyReturned || invoice.status === 'partially_returned') && (
+                      <span className="px-1.5 py-0.5 rounded border border-black text-black text-[10px] font-black mr-1">
+                        مرتجعة جزئياً
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span>التاريخ:</span>
@@ -557,18 +583,63 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                       </tr>
                     </thead>
                     <tbody>
-                      {displayedItems.map((item, index) => (
-                        <tr key={index} className="border-b border-black/40 font-bold">
-                          <td className="py-1 px-2 border-l border-black text-center font-mono">{index + 1}</td>
-                          <td className="py-1 px-2 border-l border-black">{item.name || item.productName}</td>
-                          <td className="py-1 px-2 border-l border-black text-center font-mono">{item.quantity}</td>
-                          <td className="py-1 px-2 border-l border-black text-center font-mono">{item.unitPrice.toLocaleString()}</td>
-                          <td className="py-1 px-2 text-center font-mono">{item.total.toLocaleString()}</td>
-                        </tr>
-                      ))}
+                      {displayedItems.map((item, index) => {
+                        const returnedQty = item.returnedQuantity || 0;
+                        const netQty = Math.max(0, item.quantity - returnedQty);
+                        return (
+                          <tr key={index} className="border-b border-black/40 font-bold">
+                            <td className="py-1 px-2 border-l border-black text-center font-mono">{index + 1}</td>
+                            <td className="py-1 px-2 border-l border-black">
+                              <div>{item.name || item.productName}</div>
+                              {returnedQty > 0 && (
+                                <div className="text-[10px] text-red-600 font-semibold print:text-black">
+                                  [مسترجع: {returnedQty} {item.unit || 'قطعة'}]
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-1 px-2 border-l border-black text-center font-mono">
+                              {returnedQty > 0 ? (
+                                <span>{netQty} <span className="text-[9px] text-slate-500 font-normal">({item.quantity})</span></span>
+                              ) : (
+                                item.quantity
+                              )}
+                            </td>
+                            <td className="py-1 px-2 border-l border-black text-center font-mono">{item.unitPrice.toLocaleString()}</td>
+                            <td className="py-1 px-2 text-center font-mono">{(netQty * item.unitPrice).toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
+
+                {/* Returned Items Box with Reasons */}
+                {invoice.returnedItems && invoice.returnedItems.length > 0 && (
+                  <div className="border border-black rounded-md p-2 bg-slate-50/70 text-xs">
+                    <div className="font-black border-b border-black/30 pb-1 mb-1 flex items-center justify-between">
+                      <span>سجل تفاصيل المواد المسترجعة والسبب:</span>
+                      <span className="font-mono text-[11px]">
+                        إجمالي المرتجع: {invoice.totalReturnedAmount?.toLocaleString()} {currencyLabel}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {invoice.returnedItems.map((ret, rIdx) => (
+                        <div key={rIdx} className="flex items-center justify-between text-[11px] font-bold">
+                          <div>
+                            <span>{rIdx + 1}. {ret.productName}</span> ({ret.quantity} {ret.unit || 'قطعة'})
+                            <span className="text-slate-700 mr-2 font-semibold">
+                              السبب: <span className="underline">{ret.reason}</span>
+                            </span>
+                            {ret.notes && <span className="text-slate-500 mr-1 text-[10px]">({ret.notes})</span>}
+                          </div>
+                          <span className="font-mono text-red-600 print:text-black">
+                            -{ret.refundAmount.toLocaleString()} {currencyLabel}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Summary Table */}
                 <div className="flex justify-between items-start gap-3 pt-1">
@@ -587,6 +658,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                           <td className="py-1 px-2 border-l border-black bg-slate-100">مجموع القائمة</td>
                           <td className="py-1 px-2 font-mono text-left">{invoiceTotal.toLocaleString()} {currencyLabel}</td>
                         </tr>
+                        {invoice.totalReturnedAmount && invoice.totalReturnedAmount > 0 ? (
+                          <tr className="border-b border-black bg-slate-50 text-red-700 print:text-black">
+                            <td className="py-1 px-2 border-l border-black">المسترجع</td>
+                            <td className="py-1 px-2 font-mono text-left">-{invoice.totalReturnedAmount.toLocaleString()} {currencyLabel}</td>
+                          </tr>
+                        ) : null}
                         {previousDebt > 0 && (
                           <tr className="border-b border-black">
                             <td className="py-1 px-2 border-l border-black bg-slate-100">حساب سابق</td>
@@ -651,21 +728,53 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedItems.map((item, index) => (
-                      <tr key={index} className="border-b border-dotted border-black/50">
-                        <td className="py-0.5 leading-tight">{item.name || item.productName}</td>
-                        <td className="py-0.5 text-center font-bold">{item.quantity}</td>
-                        <td className="py-0.5 text-left font-bold">{item.total.toLocaleString()}</td>
-                      </tr>
-                    ))}
+                    {displayedItems.map((item, index) => {
+                      const returnedQty = item.returnedQuantity || 0;
+                      const netQty = Math.max(0, item.quantity - returnedQty);
+                      return (
+                        <tr key={index} className="border-b border-dotted border-black/50">
+                          <td className="py-0.5 leading-tight">
+                            <div>{item.name || item.productName}</div>
+                            {returnedQty > 0 && (
+                              <div className="text-[8px] text-red-700 font-bold print:text-black">
+                                (مسترجع: {returnedQty})
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-0.5 text-center font-bold">
+                            {returnedQty > 0 ? `${netQty}` : item.quantity}
+                          </td>
+                          <td className="py-0.5 text-left font-bold">{(netQty * item.unitPrice).toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+
+                {/* Returned Items in Thermal */}
+                {invoice.returnedItems && invoice.returnedItems.length > 0 && (
+                  <div className="border-t border-dashed border-black pt-1 pb-1 text-[9px] space-y-0.5">
+                    <div className="font-black">المواد المسترجعة:</div>
+                    {invoice.returnedItems.map((ret, rIdx) => (
+                      <div key={rIdx} className="flex justify-between">
+                        <span>{ret.productName} ({ret.quantity}) - {ret.reason}</span>
+                        <span className="font-bold">-{ret.refundAmount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="border-t border-black pt-1.5 space-y-1 text-[11px] font-bold">
                   <div className="flex justify-between">
                     <span>مجموع القائمة:</span>
                     <span>{invoiceTotal.toLocaleString()} {currencyLabel}</span>
                   </div>
+                  {invoice.totalReturnedAmount && invoice.totalReturnedAmount > 0 ? (
+                    <div className="flex justify-between text-red-700 print:text-black">
+                      <span>المسترجع:</span>
+                      <span>-{invoice.totalReturnedAmount.toLocaleString()} {currencyLabel}</span>
+                    </div>
+                  ) : null}
                   {previousDebt > 0 && (
                     <div className="flex justify-between">
                       <span>حساب سابق:</span>
@@ -702,6 +811,18 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
         </div>
 
       </div>
+
+      {/* نافذة الاسترجاع الجزئي للقائمة المفتوحة */}
+      <PartialReturnModal
+        invoice={invoice}
+        isOpen={isPartialReturnOpen}
+        onClose={() => setIsPartialReturnOpen(false)}
+        onSuccess={() => {
+          setIsPartialReturnOpen(false);
+          onClose();
+        }}
+      />
+
     </div>
   );
 };

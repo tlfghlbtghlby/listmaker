@@ -30,7 +30,8 @@ import {
   DEFAULT_SUPERVISOR_PERMISSIONS,
   DEFAULT_ADMIN_PERMISSIONS,
   Shift,
-  ShiftItemSold
+  ShiftItemSold,
+  ReturnedItemRecord
 } from '../types';
 
 interface AppContextType {
@@ -71,6 +72,12 @@ interface AppContextType {
   createInvoice: (data: CreateInvoiceInput) => Invoice;
   deleteInvoice: (id: string) => void;
   returnInvoice: (id: string) => Promise<boolean>;
+  returnPartialInvoice: (
+    invoiceId: string,
+    itemsToReturn: { productId: string; quantity: number }[],
+    reason: string,
+    notes?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   applyBulkPriceAdjustment: (percentage: number, priceTargets: { retail: boolean; wholesale: boolean; cost: boolean }, roundToHundreds?: boolean) => Promise<{ updatedCount: number }>;
   recordPayment: (customerId: string, amount: number, notes?: string) => PaymentRecord;
   updateSettings: (newSettings: Partial<StoreSettings>) => void;
@@ -768,14 +775,229 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const inv = invoices.find(i => i.id === id);
     if (!inv || inv.status === 'returned') return false;
-    inv.items.forEach(i => adjustStock(i.productId, i.deductedPieces ?? i.quantity));
-    await updateDoc(doc(db, 'invoices', id), sanitizeForFirestore({ status: 'returned' })).catch(() => {});
+
+    // Return remaining unreturned stock to inventory
+    inv.items.forEach(i => {
+      const alreadyReturned = i.returnedQuantity || 0;
+      const unreturned = Math.max(0, i.quantity - alreadyReturned);
+      if (unreturned > 0) {
+        const factor = (i.unitType === 'carton' && i.piecesPerCarton) ? i.piecesPerCarton : 1;
+        adjustStock(i.productId, unreturned * factor);
+      }
+    });
+
+    // Reduce customer debt if credit invoice
+    if (inv.customerId && inv.remainingAmount > 0) {
+      setCustomers(prev => {
+        const updated = prev.map(c => c.id === inv.customerId ? { ...c, totalDebt: Math.max(0, c.totalDebt - inv.remainingAmount) } : c);
+        try { localStorage.setItem('cached_pos_customers', JSON.stringify(updated)); } catch (e) {}
+        return updated;
+      });
+      const customerDoc = doc(db, 'customers', inv.customerId);
+      const custObj = customers.find(c => c.id === inv.customerId);
+      if (custObj) {
+        updateDoc(customerDoc, sanitizeForFirestore({ totalDebt: Math.max(0, custObj.totalDebt - inv.remainingAmount) })).catch(() => {});
+      }
+    }
+
+    // Active shift adjustment if applicable
+    if (activeShift && (inv.shiftId === activeShift.id || !inv.shiftId)) {
+      setActiveShift(prev => {
+        if (!prev) return null;
+        const updatedShift = {
+          ...prev,
+          totalSales: Math.max(0, (prev.totalSales || 0) - (inv.total || 0)),
+          totalPaid: Math.max(0, (prev.totalPaid || 0) - (inv.paidAmount || 0)),
+          totalRemaining: Math.max(0, (prev.totalRemaining || 0) - (inv.remainingAmount || 0)),
+          totalCost: Math.max(0, (prev.totalCost || 0) - (inv.totalCost || 0)),
+          totalProfit: Math.max(0, (prev.totalProfit || 0) - (inv.netProfit || 0)),
+        };
+        try { localStorage.setItem('cached_pos_active_shift', JSON.stringify(updatedShift)); } catch (e) {}
+        setDoc(doc(db, 'shifts', updatedShift.id), sanitizeForFirestore({ ...updatedShift, ownerUid: currentUser?.uid || '' }), { merge: true }).catch(() => {});
+        return updatedShift;
+      });
+    }
+
+    const updatedInv: Invoice = {
+      ...inv,
+      status: 'returned' as const,
+      isPartiallyReturned: false,
+      items: inv.items.map(it => ({ ...it, returnedQuantity: it.quantity })),
+      total: 0,
+      paidAmount: 0,
+      remainingAmount: 0,
+      netProfit: 0,
+      totalCost: 0,
+      totalReturnedAmount: (inv.totalReturnedAmount || 0) + inv.total,
+    };
+
+    await updateDoc(doc(db, 'invoices', id), sanitizeForFirestore(updatedInv) as any).catch(() => {});
     setInvoices(prev => {
-      const updated = prev.map(i => i.id === id ? { ...i, status: 'returned' as const } : i);
+      const updated = prev.map(i => i.id === id ? updatedInv : i);
       try { localStorage.setItem('cached_pos_invoices', JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
     return true;
+  };
+
+  const returnPartialInvoice = async (
+    invoiceId: string,
+    itemsToReturn: { productId: string; quantity: number }[],
+    reason: string,
+    notes?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!hasPermission('canReturnInvoice')) {
+      const err = '⚠️ لا تملك صلاحية استعادة وإرجاع الفواتير في جلسة الموظف الحالية. يرجى التحويل لجلسة المشرف أو الأدمن.';
+      setSyncNotice(err);
+      setTimeout(() => setSyncNotice(null), 4000);
+      return { success: false, error: err };
+    }
+
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) {
+      return { success: false, error: 'القائمة غير موجودة' };
+    }
+    if (inv.status === 'returned') {
+      return { success: false, error: 'تم إرجاع هذه القائمة بالكامل مسبقاً.' };
+    }
+
+    const validItemsToReturn = itemsToReturn.filter(it => it.quantity > 0);
+    if (validItemsToReturn.length === 0) {
+      return { success: false, error: 'يرجى تحديد كمية مادة واحدة على الأقل للإرجاع.' };
+    }
+
+    let totalRefundAmount = 0;
+    let totalCostReduction = 0;
+    const now = new Date().toISOString();
+    const operatorName = currentUser?.displayName || currentUser?.storeName || (
+      sessionRole === 'admin' ? 'المدير' : sessionRole === 'supervisor' ? 'المشرف' : 'الموظف'
+    );
+
+    const newReturnedRecords: ReturnedItemRecord[] = [];
+
+    const updatedInvoiceItems = inv.items.map(item => {
+      const returnTarget = validItemsToReturn.find(r => r.productId === item.productId);
+      if (!returnTarget) return item;
+
+      const currentReturned = item.returnedQuantity || 0;
+      const maxReturnable = Math.max(0, item.quantity - currentReturned);
+      const qtyToReturn = Math.min(returnTarget.quantity, maxReturnable);
+
+      if (qtyToReturn <= 0) return item;
+
+      const lineRefund = qtyToReturn * item.unitPrice;
+      const lineCost = qtyToReturn * (item.costPrice || 0);
+
+      totalRefundAmount += lineRefund;
+      totalCostReduction += lineCost;
+
+      const pieceMultiplier = (item.unitType === 'carton' && item.piecesPerCarton) ? item.piecesPerCarton : 1;
+      adjustStock(item.productId, qtyToReturn * pieceMultiplier);
+
+      newReturnedRecords.push({
+        id: 'ret_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6) + '_' + item.productId,
+        productId: item.productId,
+        productName: item.productName || (item as any).name || 'مادة',
+        code: item.code || '',
+        unit: item.unit || 'قطعة',
+        quantity: qtyToReturn,
+        unitPrice: item.unitPrice,
+        costPrice: item.costPrice || 0,
+        refundAmount: lineRefund,
+        reason: reason.trim() || 'رغبة الزبون / تبديل',
+        notes: notes?.trim() || '',
+        returnedAt: now,
+        returnedBy: operatorName,
+      });
+
+      return {
+        ...item,
+        returnedQuantity: currentReturned + qtyToReturn,
+      };
+    });
+
+    if (newReturnedRecords.length === 0) {
+      return { success: false, error: 'لم يتم تحديد أي كميات صالحة للإرجاع.' };
+    }
+
+    const allItemsFullyReturned = updatedInvoiceItems.every(
+      i => (i.returnedQuantity || 0) >= i.quantity
+    );
+
+    let debtReduction = 0;
+    let cashRefund = 0;
+
+    if (inv.remainingAmount > 0) {
+      debtReduction = Math.min(inv.remainingAmount, totalRefundAmount);
+      cashRefund = Math.max(0, totalRefundAmount - debtReduction);
+    } else {
+      cashRefund = totalRefundAmount;
+    }
+
+    const newRemainingAmount = Math.max(0, inv.remainingAmount - debtReduction);
+    const newPaidAmount = Math.max(0, inv.paidAmount - cashRefund);
+    const newTotal = Math.max(0, inv.total - totalRefundAmount);
+    const newSubtotal = Math.max(0, (inv.subtotal || inv.total) - totalRefundAmount);
+    const newTotalCost = Math.max(0, (inv.totalCost || 0) - totalCostReduction);
+    const newNetProfit = Math.max(0, (inv.netProfit || 0) - (totalRefundAmount - totalCostReduction));
+
+    if (debtReduction > 0 && inv.customerId) {
+      setCustomers(prev => {
+        const updated = prev.map(c => c.id === inv.customerId ? { ...c, totalDebt: Math.max(0, c.totalDebt - debtReduction) } : c);
+        try { localStorage.setItem('cached_pos_customers', JSON.stringify(updated)); } catch (e) {}
+        return updated;
+      });
+      const custRef = doc(db, 'customers', inv.customerId);
+      const custObj = customers.find(c => c.id === inv.customerId);
+      if (custObj) {
+        updateDoc(custRef, sanitizeForFirestore({ totalDebt: Math.max(0, custObj.totalDebt - debtReduction) })).catch(() => {});
+      }
+    }
+
+    if (activeShift && (inv.shiftId === activeShift.id || !inv.shiftId)) {
+      setActiveShift(prev => {
+        if (!prev) return null;
+        const updatedShift = {
+          ...prev,
+          totalSales: Math.max(0, (prev.totalSales || 0) - totalRefundAmount),
+          totalPaid: Math.max(0, (prev.totalPaid || 0) - cashRefund),
+          totalRemaining: Math.max(0, (prev.totalRemaining || 0) - debtReduction),
+          totalCost: Math.max(0, (prev.totalCost || 0) - totalCostReduction),
+          totalProfit: Math.max(0, (prev.totalProfit || 0) - (totalRefundAmount - totalCostReduction)),
+        };
+        try { localStorage.setItem('cached_pos_active_shift', JSON.stringify(updatedShift)); } catch (e) {}
+        setDoc(doc(db, 'shifts', updatedShift.id), sanitizeForFirestore({ ...updatedShift, ownerUid: currentUser?.uid || '' }), { merge: true }).catch(() => {});
+        return updatedShift;
+      });
+    }
+
+    const updatedInvoice: Invoice = {
+      ...inv,
+      items: updatedInvoiceItems,
+      subtotal: newSubtotal,
+      total: newTotal,
+      paidAmount: newPaidAmount,
+      remainingAmount: newRemainingAmount,
+      totalCost: newTotalCost,
+      netProfit: newNetProfit,
+      totalReturnedAmount: (inv.totalReturnedAmount || 0) + totalRefundAmount,
+      returnedItems: [...(inv.returnedItems || []), ...newReturnedRecords],
+      status: allItemsFullyReturned ? 'returned' : 'partially_returned',
+      isPartiallyReturned: !allItemsFullyReturned,
+    };
+
+    await updateDoc(doc(db, 'invoices', invoiceId), sanitizeForFirestore(updatedInvoice) as any).catch(() => {});
+
+    setInvoices(prev => {
+      const updated = prev.map(i => i.id === invoiceId ? updatedInvoice : i);
+      try { localStorage.setItem('cached_pos_invoices', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+
+    setSyncNotice(`✅ تم استرجاع المواد بنجاح (المبلغ المسترد: ${totalRefundAmount.toLocaleString()} ${settings.currency}). تم تحديث المخزن والحسابات.`);
+    setTimeout(() => setSyncNotice(null), 4000);
+
+    return { success: true };
   };
 
   const applyBulkPriceAdjustment = async () => ({ updatedCount: 0 });
@@ -879,14 +1101,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalProfit += (inv.netProfit !== undefined ? inv.netProfit : ((inv.total || 0) - (inv.totalCost || 0)));
 
       (inv.items || []).forEach(item => {
+        const netQty = Math.max(0, item.quantity - (item.returnedQuantity || 0));
+        if (netQty <= 0) return;
         const key = item.productId || item.code || item.productName || 'unknown';
-        const itemSales = item.total || (item.unitPrice * item.quantity);
-        const itemCost = (item.costPrice || 0) * item.quantity;
+        const itemSales = item.unitPrice * netQty;
+        const itemCost = (item.costPrice || 0) * netQty;
         const itemProfit = itemSales - itemCost;
 
         const existing = itemsMap.get(key);
         if (existing) {
-          existing.quantity += item.quantity;
+          existing.quantity += netQty;
           existing.totalSales += itemSales;
           existing.totalCost += itemCost;
           existing.totalProfit += itemProfit;
@@ -896,7 +1120,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             productName: item.productName || (item as any).name || 'مادة',
             code: item.code || '',
             unit: item.unit || 'قطعة',
-            quantity: item.quantity,
+            quantity: netQty,
             unitPrice: item.unitPrice,
             costPrice: item.costPrice || 0,
             totalSales: itemSales,
@@ -1061,7 +1285,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         selectedShiftForDetails, setSelectedShiftForDetails,
         addProduct, addBulkProducts, updateProduct, deleteProduct, adjustStock,
         addCustomer, updateCustomer, deleteCustomer,
-        createInvoice, deleteInvoice, returnInvoice, applyBulkPriceAdjustment,
+        createInvoice, deleteInvoice, returnInvoice, returnPartialInvoice, applyBulkPriceAdjustment,
         recordPayment, updateSettings, resetToDemo, resetToZero,
         exportDataJSON, importDataJSON, formatMoney,
         currentUser, authLoading, isCloudConnected, isSyncing,
