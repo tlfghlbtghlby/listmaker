@@ -40,7 +40,6 @@ interface POSViewProps {
   onOpenSettings?: () => void;
 }
 
-// Scanner Audio Feedback using Web Audio API
 const playScannerBeep = (type: 'success' | 'alert' = 'success') => {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -68,9 +67,7 @@ const playScannerBeep = (type: 'success' | 'alert' = 'success') => {
       osc.start();
       osc.stop(ctx.currentTime + 0.25);
     }
-  } catch (e) {
-    // Autoplay policy or unsupported
-  }
+  } catch (e) {}
 };
 
 export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewProduct, onEditProduct, onOpenSettings }) => {
@@ -87,22 +84,18 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     hasPermission
   } = useApp();
 
-  // POS State
   const [saleType, setSaleType] = useState<SaleType>('direct');
   const [globalPriceType, setGlobalPriceType] = useState<PriceType>('retail');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [mobileTab, setMobileTab] = useState<'products' | 'cart'>('products');
   
-  // Cart Items
   const [cartItems, setCartItems] = useState<InvoiceItem[]>([]);
   
-  // Customer info for sale
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [customCustomerName, setCustomCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
   
-  // Quick Add Customer Modal State
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickCustomerName, setQuickCustomerName] = useState('');
   const [quickCustomerPhone, setQuickCustomerPhone] = useState('');
@@ -110,12 +103,28 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const [quickCustomerInitialDebt, setQuickCustomerInitialDebt] = useState<number | ''>('');
   const [quickCustomerError, setQuickCustomerError] = useState('');
 
-  // Quick Price Edit Modal State (تعديل السعر المباشر من بطاقة المادة)
   const [productForPriceEdit, setProductForPriceEdit] = useState<Product | null>(null);
   const [editRetailPrice, setEditRetailPrice] = useState<number | ''>('');
   const [editWholesalePrice, setEditWholesalePrice] = useState<number | ''>('');
   const [editCostPrice, setEditCostPrice] = useState<number | ''>('');
   const [editPiecesPerCarton, setEditPiecesPerCarton] = useState<number | ''>('');
+
+  const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
+  const [tempItemPrice, setTempItemPrice] = useState<string>('');
+
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [cartErrorNotice, setCartErrorNotice] = useState<string | null>(null);
+  const [unfoundBarcodePrompt, setUnfoundBarcodePrompt] = useState<string | null>(null);
+
+  const [discount, setDiscount] = useState<number>(0);
+  const [paidAmount, setPaidAmount] = useState<number>(0);
+  const [dueDate, setDueDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 15);
+    return d.toISOString().split('T')[0];
+  });
+  const [notes, setNotes] = useState<string>('');
 
   const handleOpenPriceEdit = (prod: Product) => {
     setProductForPriceEdit(prod);
@@ -163,10 +172,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setTimeout(() => setScanNotice(null), 3000);
     setProductForPriceEdit(null);
   };
-
-  // Cart Item Price Edit State (تعديل السعر في هذه القائمة فقط للزبون دون تغيير أسعار المخزن)
-  const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
-  const [tempItemPrice, setTempItemPrice] = useState<string>('');
 
   const handleToggleEditCartItemPrice = (item: InvoiceItem) => {
     if (editingPriceProductId === item.productId) {
@@ -224,29 +229,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     setTempItemPrice('');
   };
 
-  // Barcode scanner & instant feedback
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scanNotice, setScanNotice] = useState<string | null>(null);
-  const [cartErrorNotice, setCartErrorNotice] = useState<string | null>(null);
-  const [unfoundBarcodePrompt, setUnfoundBarcodePrompt] = useState<string | null>(null);
-
-  // Financial modifiers
-  const [discount, setDiscount] = useState<number>(0);
-  const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [dueDate, setDueDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    return d.toISOString().split('T')[0];
-  });
-  const [notes, setNotes] = useState<string>('');
-
-  // Categories list
   const categories = useMemo(() => {
     const set = new Set(products.map((p) => p.category));
     return ['all', ...Array.from(set)];
   }, [products]);
 
-  // Filtered products
   const filteredProducts = useMemo(() => {
     return products.filter((prod) => {
       const matchCat = selectedCategory === 'all' || prod.category === selectedCategory;
@@ -260,7 +247,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // Selected customer details
   const selectedCustomer = useMemo(() => {
     return customers.find((c) => c.id === selectedCustomerId);
   }, [customers, selectedCustomerId]);
@@ -544,7 +530,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const previousCustomerDebt = selectedCustomer ? selectedCustomer.totalDebt : 0;
   const newCustomerDebt = previousCustomerDebt + remainingDebt;
 
-  // حفظ الفاتورة واستدعاء الطباعة فقط إذا كان andPrint = true
   const handleSaveInvoice = (andPrint: boolean) => {
     if (cartItems.length === 0) {
       setCartErrorNotice('الرجاء إضافة مادة واحدة على الأقل إلى القائمة');
@@ -610,7 +595,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       setCustomerPhone('');
     }
 
-    // تم حذف الاستدعاء المكرر هنا بالكامل، وتمرير خيار andPrint إلى المكون الأب App.tsx
     onInvoiceCreated(created, andPrint);
   };
 
@@ -618,7 +602,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Mobile Mode Switcher Tabs */}
       {isMobileMode && (
         <div className="flex items-center bg-slate-200/90 p-1 rounded-xl text-xs font-bold w-full shadow-inner">
           <button
@@ -656,13 +639,9 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
         </div>
       )}
 
-      {/* Main Content Grid */}
       <div className={isMobileMode ? 'flex flex-col gap-4' : 'grid grid-cols-12 gap-4 lg:gap-6'}>
-        
-        {/* Products Column */}
         {(!isMobileMode || mobileTab === 'products') && (
           <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-7'} flex flex-col gap-4`}>
-            
             <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
@@ -908,7 +887,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                             </button>
                           )}
                         </div>
-
                       </div>
                     </div>
                   );
@@ -937,14 +915,11 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </button>
               </div>
             )}
-
           </div>
         )}
 
-        {/* Invoice Builder & Cart Column */}
         {(!isMobileMode || mobileTab === 'cart') && (
           <div className={`${isMobileMode ? 'w-full' : 'col-span-12 md:col-span-5 md:sticky md:top-4'} flex flex-col gap-4`}>
-            
             {isMobileMode && (
               <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-slate-200">
                 <button
@@ -962,1016 +937,998 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             )}
             
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-          
-          <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700">نوع القائمة:</span>
-              <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
-                <button
-                  onClick={() => setSaleType('direct')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                    saleType === 'direct'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-700 hover:text-slate-900'
-                  }`}
-                >
-                  <DollarSign className="w-3.5 h-3.5" />
-                  <span>بيع مباشر (نقدي)</span>
-                </button>
-                <button
-                  onClick={() => setSaleType('credit')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                    saleType === 'credit'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'text-slate-700 hover:text-slate-900'
-                  }`}
-                >
-                  <CreditCard className="w-3.5 h-3.5" />
-                  <span>بيع آجل (دين)</span>
-                </button>
-              </div>
-            </div>
-
-            {settings.enableWholesale ? (
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80 gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs font-bold text-slate-700">سعر البيع:</span>
-                  <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-semibold">
+              <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">نوع القائمة:</span>
+                  <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
                     <button
-                      onClick={() => handleGlobalPriceTypeChange('retail')}
-                      className={`px-2.5 py-1 rounded-md transition ${
-                        globalPriceType === 'retail'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                      onClick={() => setSaleType('direct')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+                        saleType === 'direct'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-700 hover:text-slate-900'
                       }`}
                     >
-                      مفرد
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>بيع مباشر (نقدي)</span>
                     </button>
                     <button
-                      onClick={() => handleGlobalPriceTypeChange('wholesale')}
-                      className={`px-2.5 py-1 rounded-md transition ${
-                        globalPriceType === 'wholesale'
-                          ? 'bg-white text-emerald-800 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                      onClick={() => setSaleType('credit')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+                        saleType === 'credit'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'text-slate-700 hover:text-slate-900'
                       }`}
                     >
-                      سعر الجملة
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>بيع آجل (دين)</span>
                     </button>
                   </div>
                 </div>
 
-                {/* زر التبديل بين جلسة الأدمن وجلسة الموظف بجانب سعر بيع الجملة مباشرة */}
-                <SessionBadgeButton compact={true} />
-              </div>
-            ) : (
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
-                <span className="text-xs font-bold text-slate-700">جلسة النظام:</span>
-                <SessionBadgeButton compact={true} />
-              </div>
-            )}
-
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[520px] lg:max-h-[calc(100vh-320px)]">
-            {cartItems.length === 0 ? (
-              <div className="h-44 flex flex-col items-center justify-center text-slate-400 text-center">
-                <ShoppingCart className="w-10 h-10 mb-2 stroke-1 text-slate-300" />
-                <p className="text-sm font-semibold text-slate-600">القائمة فارغة حالياً</p>
-                <p className="text-xs text-slate-400 mt-0.5">انقر على أي مادة من القائمة لإضافتها</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {cartItems.map((item, index) => {
-                  const cartonCapacity = item.piecesPerCarton || 1;
-                  const isCarton = item.unitType === 'carton';
-                  const prodRef = products.find(p => p.id === item.productId);
-                  const isStockZero = prodRef ? prodRef.stock <= 0 : false;
-
-                  return (
-                    <div
-                      key={item.productId}
-                      className={`border rounded-lg p-2.5 flex flex-col gap-2 ${
-                        isStockZero 
-                          ? 'bg-rose-50/50 border-rose-300' 
-                          : 'bg-slate-50 border-slate-200/90'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2 flex-wrap">
-                        <div>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span 
-                              className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 font-mono text-[11px] font-bold flex items-center justify-center shrink-0" 
-                              title={`رقم تسلسل المادة في الطلب: ${index + 1}`}
-                            >
-                              {index + 1}
-                            </span>
-                            <span className="text-xs font-bold text-slate-900 leading-snug">
-                              {item.productName}
-                            </span>
-                            {item.isCustomPrice && (
-                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 flex items-center gap-0.5">
-                                <Pencil className="w-2.5 h-2.5 text-blue-600" />
-                                <span>سعر خاص بالقائمة</span>
-                              </span>
-                            )}
-                            {isStockZero && (
-                              <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[10px] font-black animate-pulse">
-                                رصيد القطع صفر بالمخزن ({prodRef?.stock ?? 0})
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
-                            <span>الوحدة الأساسية: {item.unit}</span>
-                            <span>·</span>
-                            <span className="text-emerald-700 font-medium">
-                              تكلفة: {formatMoney(item.costPrice)}
-                            </span>
-                            {prodRef && (
-                              <span className={prodRef.stock <= 0 ? "text-rose-600 font-bold" : "text-slate-600"}>
-                                · رصيد المخزن: {prodRef.stock} {prodRef.unit}
-                              </span>
-                            )}
-                            {isCarton && (
-                              <span className="text-amber-800 font-bold bg-amber-100/90 px-1.5 py-0.2 rounded text-[10px]">
-                                (كرتون = {cartonCapacity} قطعة)
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* زر صغير على شكل قلم لتعديل السعر في هذه القائمة فقط للزبون */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleEditCartItemPrice(item)}
-                            className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center shrink-0 ${
-                              editingPriceProductId === item.productId
-                                ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-300'
-                                : item.isCustomPrice
-                                ? 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200'
-                                : 'bg-white text-blue-600 hover:text-blue-800 border-slate-300 hover:border-blue-400 hover:bg-blue-50 shadow-2xs'
-                            }`}
-                            title="تعديل سعر البيع في هذه القائمة فقط للزبون"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-
-                          <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-md border border-slate-300 text-[10px] font-bold">
-                            <button
-                              type="button"
-                              onClick={() => toggleItemUnitType(item.productId, 'piece')}
-                              className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-0.5 ${
-                                !isCarton
-                                  ? 'bg-white text-emerald-800 shadow-2xs font-extrabold'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                              title="بيع بالقطعة"
-                            >
-                              <span>قطعة</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleItemUnitType(item.productId, 'carton')}
-                              className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
-                                isCarton
-                                  ? 'bg-amber-600 text-white shadow-2xs font-extrabold'
-                                  : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                              title={`بيع بالكرتون (${cartonCapacity} قطعة)`}
-                            >
-                              <Box className="w-3 h-3" />
-                              <span>كرتون</span>
-                            </button>
-                          </div>
-
-                          {settings.enableWholesale && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                toggleItemPriceType(
-                                  item.productId,
-                                  item.priceType === 'retail' ? 'wholesale' : 'retail'
-                                )
-                              }
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition cursor-pointer ${
-                                item.priceType === 'wholesale'
-                                  ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                  : 'bg-slate-200 text-slate-800 border-slate-300'
-                              }`}
-                              title="انقر للتبديل بين سعر التجزئة وسعر الجملة لهذه المادة"
-                            >
-                              {item.priceType === 'wholesale' ? 'جملة' : 'مفرد'}
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => removeFromCart(item.productId)}
-                            className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded hover:bg-rose-50"
-                            title="حذف المادة من القائمة"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                {settings.enableWholesale ? (
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/80 gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-slate-700">سعر البيع:</span>
+                      <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-semibold">
+                        <button
+                          onClick={() => handleGlobalPriceTypeChange('retail')}
+                          className={`px-2.5 py-1 rounded-md transition ${
+                            globalPriceType === 'retail'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          مفرد
+                        </button>
+                        <button
+                          onClick={() => handleGlobalPriceTypeChange('wholesale')}
+                          className={`px-2.5 py-1 rounded-md transition ${
+                            globalPriceType === 'wholesale'
+                              ? 'bg-white text-emerald-800 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          سعر الجملة
+                        </button>
                       </div>
+                    </div>
+                    <SessionBadgeButton compact={true} />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
+                    <span className="text-xs font-bold text-slate-700">جلسة النظام:</span>
+                    <SessionBadgeButton compact={true} />
+                  </div>
+                )}
+              </div>
 
-                      {/* لوحة تعديل السعر المباشر في هذه القائمة فقط عند الضغط على زر القلم */}
-                      {editingPriceProductId === item.productId && (
-                        <div className="bg-blue-50/90 border border-blue-300 rounded-lg p-2.5 my-0.5 flex flex-col gap-2 shadow-xs">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-blue-950">
-                              <Pencil className="w-3.5 h-3.5 text-blue-600" />
-                              <span>تعديل سعر البيع في هذه القائمة فقط للزبون:</span>
+              <div className="flex-1 overflow-y-auto p-3 min-h-[160px] max-h-[520px] lg:max-h-[calc(100vh-320px)]">
+                {cartItems.length === 0 ? (
+                  <div className="h-44 flex flex-col items-center justify-center text-slate-400 text-center">
+                    <ShoppingCart className="w-10 h-10 mb-2 stroke-1 text-slate-300" />
+                    <p className="text-sm font-semibold text-slate-600">القائمة فارغة حالياً</p>
+                    <p className="text-xs text-slate-400 mt-0.5">انقر على أي مادة من القائمة لإضافتها</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {cartItems.map((item, index) => {
+                      const cartonCapacity = item.piecesPerCarton || 1;
+                      const isCarton = item.unitType === 'carton';
+                      const prodRef = products.find(p => p.id === item.productId);
+                      const isStockZero = prodRef ? prodRef.stock <= 0 : false;
+
+                      return (
+                        <div
+                          key={item.productId}
+                          className={`border rounded-lg p-2.5 flex flex-col gap-2 ${
+                            isStockZero 
+                              ? 'bg-rose-50/50 border-rose-300' 
+                              : 'bg-slate-50 border-slate-200/90'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2 flex-wrap">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span 
+                                  className="w-5 h-5 rounded-md bg-slate-200 text-slate-700 font-mono text-[11px] font-bold flex items-center justify-center shrink-0" 
+                                  title={`رقم تسلسل المادة في الطلب: ${index + 1}`}
+                                >
+                                  {index + 1}
+                                </span>
+                                <span className="text-xs font-bold text-slate-900 leading-snug">
+                                  {item.productName}
+                                </span>
+                                {item.isCustomPrice && (
+                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200 flex items-center gap-0.5">
+                                    <Pencil className="w-2.5 h-2.5 text-blue-600" />
+                                    <span>سعر خاص بالقائمة</span>
+                                  </span>
+                                )}
+                                {isStockZero && (
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[10px] font-black animate-pulse">
+                                    رصيد القطع صفر بالمخزن ({prodRef?.stock ?? 0})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span>الوحدة الأساسية: {item.unit}</span>
+                                <span>·</span>
+                                <span className="text-emerald-700 font-medium">
+                                  تكلفة: {formatMoney(item.costPrice)}
+                                </span>
+                                {prodRef && (
+                                  <span className={prodRef.stock <= 0 ? "text-rose-600 font-bold" : "text-slate-600"}>
+                                    · رصيد المخزن: {prodRef.stock} {prodRef.unit}
+                                  </span>
+                                )}
+                                {isCarton && (
+                                  <span className="text-amber-800 font-bold bg-amber-100/90 px-1.5 py-0.2 rounded text-[10px]">
+                                    (كرتون = {cartonCapacity} قطعة)
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-600 font-medium">
-                              سعر التكلفة: <span className="font-bold text-slate-800 font-mono">{formatMoney(item.costPrice)}</span>
-                            </div>
-                          </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <div className="relative flex-1">
-                              <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                value={tempItemPrice}
-                                onChange={(e) => setTempItemPrice(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleSaveCartItemPrice(item.productId);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingPriceProductId(null);
-                                  }
-                                }}
-                                placeholder={`السعر للـ ${isCarton ? 'كرتون' : (item.unit || 'قطعة')}...`}
-                                className="w-full pl-8 pr-2.5 py-1.5 text-sm font-bold bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-mono"
-                                autoFocus
-                              />
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400">
-                                {settings.currency}
-                              </span>
-                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEditCartItemPrice(item)}
+                                className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center shrink-0 ${
+                                  editingPriceProductId === item.productId
+                                    ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-300'
+                                    : item.isCustomPrice
+                                    ? 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200'
+                                    : 'bg-white text-blue-600 hover:text-blue-800 border-slate-300 hover:border-blue-400 hover:bg-blue-50 shadow-2xs'
+                                }`}
+                                title="تعديل سعر البيع في هذه القائمة فقط للزبون"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleSaveCartItemPrice(item.productId)}
-                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>حفظ السعر</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setEditingPriceProductId(null)}
-                              className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer shrink-0"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
-
-                          {/* تنبيه إذا كان السعر أقل من التكلفة */}
-                          {Number(tempItemPrice) < item.costPrice && Number(tempItemPrice) > 0 && (
-                            <div className="text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-0.5 flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
-                              <span>تنبيه: السعر المدخل أقل من التكلفة ({formatMoney(item.costPrice)})</span>
-                            </div>
-                          )}
-
-                          {/* أزرار سريعة للاستعادة أو أسعار النظام الأصلية */}
-                          <div className="flex items-center gap-2 text-[10px] text-slate-600 pt-0.5 border-t border-blue-200/60 flex-wrap">
-                            <span className="text-slate-500 font-semibold">استعادة سريعة:</span>
-                            {prodRef && (
-                              <>
+                              <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-md border border-slate-300 text-[10px] font-bold">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    const defaultRetail = isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice;
-                                    setTempItemPrice(String(defaultRetail));
-                                  }}
-                                  className="text-blue-700 hover:text-blue-900 font-bold underline cursor-pointer"
+                                  onClick={() => toggleItemUnitType(item.productId, 'piece')}
+                                  className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-0.5 ${
+                                    !isCarton
+                                      ? 'bg-white text-emerald-800 shadow-2xs font-extrabold'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                  title="بيع بالقطعة"
                                 >
-                                  سعر المفرد ({formatMoney(isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice)})
+                                  <span>قطعة</span>
                                 </button>
-                                {settings.enableWholesale && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleItemUnitType(item.productId, 'carton')}
+                                  className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
+                                    isCarton
+                                      ? 'bg-amber-600 text-white shadow-2xs font-extrabold'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
+                                  title={`بيع بالكرتون (${cartonCapacity} قطعة)`}
+                                >
+                                  <Box className="w-3 h-3" />
+                                  <span>كرتون</span>
+                                </button>
+                              </div>
+
+                              {settings.enableWholesale && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleItemPriceType(
+                                      item.productId,
+                                      item.priceType === 'retail' ? 'wholesale' : 'retail'
+                                    )
+                                  }
+                                  className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition cursor-pointer ${
+                                    item.priceType === 'wholesale'
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                      : 'bg-slate-200 text-slate-800 border-slate-300'
+                                  }`}
+                                  title="انقر للتبديل بين سعر التجزئة وسعر الجملة لهذه المادة"
+                                >
+                                  {item.priceType === 'wholesale' ? 'جملة' : 'مفرد'}
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => removeFromCart(item.productId)}
+                                className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer rounded hover:bg-rose-50"
+                                title="حذف المادة من القائمة"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {editingPriceProductId === item.productId && (
+                            <div className="bg-blue-50/90 border border-blue-300 rounded-lg p-2.5 my-0.5 flex flex-col gap-2 shadow-xs">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-950">
+                                  <Pencil className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>تعديل سعر البيع في هذه القائمة فقط للزبون:</span>
+                                </div>
+                                <div className="text-[10px] text-slate-600 font-medium">
+                                  سعر التكلفة: <span className="font-bold text-slate-800 font-mono">{formatMoney(item.costPrice)}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <div className="relative flex-1">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    value={tempItemPrice}
+                                    onChange={(e) => setTempItemPrice(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveCartItemPrice(item.productId);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingPriceProductId(null);
+                                      }
+                                    }}
+                                    placeholder={`السعر للـ ${isCarton ? 'كرتون' : (item.unit || 'قطعة')}...`}
+                                    className="w-full pl-8 pr-2.5 py-1.5 text-sm font-bold bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-mono"
+                                    autoFocus
+                                  />
+                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400">
+                                    {settings.currency}
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveCartItemPrice(item.productId)}
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>حفظ السعر</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingPriceProductId(null)}
+                                  className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer shrink-0"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+
+                              {Number(tempItemPrice) < item.costPrice && Number(tempItemPrice) > 0 && (
+                                <div className="text-[10px] text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-0.5 flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span>تنبيه: السعر المدخل أقل من التكلفة ({formatMoney(item.costPrice)})</span>
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-2 text-[10px] text-slate-600 pt-0.5 border-t border-blue-200/60 flex-wrap">
+                                <span className="text-slate-500 font-semibold">استعادة سريعة:</span>
+                                {prodRef && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const defaultRetail = isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice;
+                                        setTempItemPrice(String(defaultRetail));
+                                      }}
+                                      className="text-blue-700 hover:text-blue-900 font-bold underline cursor-pointer"
+                                    >
+                                      سعر المفرد ({formatMoney(isCarton ? prodRef.retailPrice * cartonCapacity : prodRef.retailPrice)})
+                                    </button>
+                                    {settings.enableWholesale && (
+                                      <>
+                                        <span>·</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const defaultWholesale = isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice;
+                                            setTempItemPrice(String(defaultWholesale));
+                                          }}
+                                          className="text-amber-800 hover:text-amber-950 font-bold underline cursor-pointer"
+                                        >
+                                          سعر الجملة ({formatMoney(isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice)})
+                                        </button>
+                                      </>
+                                    )}
+                                  </>
+                                )}
+                                {item.isCustomPrice && (
                                   <>
                                     <span>·</span>
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        const defaultWholesale = isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice;
-                                        setTempItemPrice(String(defaultWholesale));
-                                      }}
-                                      className="text-amber-800 hover:text-amber-950 font-bold underline cursor-pointer"
+                                      onClick={() => handleResetCartItemPrice(item.productId)}
+                                      className="text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
                                     >
-                                      سعر الجملة ({formatMoney(isCarton ? prodRef.wholesalePrice * cartonCapacity : prodRef.wholesalePrice)})
+                                      إلغاء السعر الخاص
                                     </button>
                                   </>
                                 )}
-                              </>
-                            )}
-                            {item.isCustomPrice && (
-                              <>
-                                <span>·</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
                                 <button
                                   type="button"
-                                  onClick={() => handleResetCartItemPrice(item.productId)}
-                                  className="text-rose-600 hover:text-rose-800 font-bold underline cursor-pointer"
+                                  onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                                  className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
                                 >
-                                  إلغاء السعر الخاص
+                                  <Minus className="w-3 h-3" />
                                 </button>
-                              </>
-                            )}
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateQuantity(item.productId, parseInt(e.target.value) || 1)
+                                  }
+                                  className="w-12 text-center text-xs font-bold py-0.5 border-x border-slate-200 focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                                  className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+
+                              <span className="text-[11px] font-bold text-slate-700">
+                                {isCarton ? 'كرتون' : item.unit || 'قطعة'}
+                              </span>
+                              {isCarton && (
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  (= {item.deductedPieces || item.quantity * cartonCapacity} قطعة)
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-right flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleEditCartItemPrice(item)}
+                                className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-700 transition cursor-pointer group"
+                                title="انقر لتعديل السعر في هذه القائمة فقط"
+                              >
+                                <span className={item.isCustomPrice ? 'font-mono text-blue-700 font-black underline' : 'font-mono'}>
+                                  {formatMoney(item.unitPrice)}
+                                </span>
+                                <Pencil className="w-2.5 h-2.5 text-blue-500 opacity-70 group-hover:opacity-100" />
+                                <span>× {item.quantity} =</span>
+                              </button>
+                              <span className="font-extrabold text-slate-900 mr-1.5">
+                                {formatMoney(item.total)}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <div className="flex items-center bg-white border border-slate-300 rounded-md overflow-hidden">
-                            <button
-                              type="button"
-                              onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                              className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) =>
-                                updateQuantity(item.productId, parseInt(e.target.value) || 1)
-                              }
-                              className="w-12 text-center text-xs font-bold py-0.5 border-x border-slate-200 focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                              className="p-1 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-
-                          <span className="text-[11px] font-bold text-slate-700">
-                            {isCarton ? 'كرتون' : item.unit || 'قطعة'}
-                          </span>
-                          {isCarton && (
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              (= {item.deductedPieces || item.quantity * cartonCapacity} قطعة)
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="text-right flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleEditCartItemPrice(item)}
-                            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-700 transition cursor-pointer group"
-                            title="انقر لتعديل السعر في هذه القائمة فقط"
-                          >
-                            <span className={item.isCustomPrice ? 'font-mono text-blue-700 font-black underline' : 'font-mono'}>
-                              {formatMoney(item.unitPrice)}
-                            </span>
-                            <Pencil className="w-2.5 h-2.5 text-blue-500 opacity-70 group-hover:opacity-100" />
-                            <span>× {item.quantity} =</span>
-                          </button>
-                          <span className="font-extrabold text-slate-900 mr-1.5">
-                            {formatMoney(item.total)}
-                          </span>
-                        </div>
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
-            <div className="space-y-1.5 text-xs text-slate-600">
-              <div className="flex justify-between">
-                <span>المجموع الأولي:</span>
-                <span className="font-bold text-slate-800">{formatMoney(subtotal)}</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span>الخصم (مبلغ نقدي):</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={discount || ''}
-                    placeholder="0"
-                    onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-24 text-left px-2 py-0.5 text-xs font-bold border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                  <span>{settings.currency}</span>
-                </div>
-              </div>
-
-              <div className="flex justify-between text-base font-extrabold text-slate-900 pt-1.5 border-t border-slate-200">
-                <span>المبلغ المطلوب:</span>
-                <span className="text-emerald-700">{formatMoney(finalTotal)}</span>
-              </div>
-
-              <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded flex justify-between font-medium">
-                <span>صافي الربح التقديري للقائمة:</span>
-                <span className="font-bold">{formatMoney(estimatedProfit)}</span>
-              </div>
-            </div>
-
-            <div className={`p-3 rounded-2xl border flex flex-col gap-2.5 transition ${
-              saleType === 'credit'
-                ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
-                : 'bg-slate-100/80 border-slate-200'
-            }`}>
-              <div className="flex items-center justify-between text-xs">
-                <span className={`font-bold flex items-center gap-1.5 ${
-                  saleType === 'credit' ? 'text-amber-950 font-black' : 'text-slate-800'
-                }`}>
-                  <UserCheck className={`w-4 h-4 ${saleType === 'credit' ? 'text-amber-700' : 'text-slate-600'}`} />
-                  <span>
-                    {saleType === 'credit' ? 'اختيار زبون آجل (مسجل مسبقاً):' : 'بيانات الزبون:'}
-                  </span>
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-2xs ${
-                    saleType === 'credit'
-                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                      : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300'
-                  }`}
-                  title="إضافة واقتراح زبون جديد للنظام للتمكن من البيع بالآجل"
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>+ اقتراح إضافة زبون</span>
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  {saleType === 'credit' ? (
-                    <span className="text-amber-900">
-                      قائمة الزبائن المسجلين مسبقاً <span className="text-rose-600 font-extrabold">* (إلزامي للآجل)</span>:
-                    </span>
-                  ) : (
-                    <span>اختر زبون قديم مسجل مسبقاً (اختياري):</span>
-                  )}
-                </label>
-
-                <select
-                  value={selectedCustomerId}
-                  onChange={(e) => handleSelectCustomer(e.target.value)}
-                  className={`w-full text-xs bg-white border rounded-lg px-2.5 py-2 font-bold focus:outline-none focus:ring-2 ${
-                    saleType === 'credit'
-                      ? selectedCustomerId
-                        ? 'border-emerald-500 text-emerald-950 bg-emerald-50/20'
-                        : 'border-amber-400 text-amber-950 ring-1 ring-amber-300'
-                      : 'border-slate-300 text-slate-800 focus:ring-emerald-500'
-                  }`}
-                >
-                  <option value="">
-                    {saleType === 'credit'
-                      ? '-- اضغط هنا لاختيار الزبون المسجل مسبقاً (إلزامي) --'
-                      : '-- زبون نقدي مباشر (بدون اختيار زبون مسجل) --'}
-                  </option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.phone ? `(${c.phone})` : ''} {c.totalDebt > 0 ? `· عليه دين: ${formatMoney(c.totalDebt)}` : '· (خالص)'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {saleType === 'credit' && !selectedCustomerId && (
-                <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-lg text-[11px] flex items-start gap-2 animate-fadeIn">
-                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="font-extrabold">لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام.</p>
-                    <p className="text-[10px] text-amber-800 mt-0.5">
-                      اختر الزبون من القائمة أعلاه، أو اضغط على زر الاقتراح لإضافته واعتماده فوراً:
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
-                      className="mt-1.5 px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-md font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer transition shadow-2xs"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>اقتراح إضافة هذا الزبون الآن</span>
-                    </button>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {selectedCustomer && (
-                <div className="bg-white border border-emerald-300 rounded-lg p-2.5 text-xs space-y-1.5 shadow-2xs">
-                  <div className="flex items-center justify-between font-bold text-slate-900">
-                    <div className="flex items-center gap-1.5 text-emerald-800">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span>زبون معتمد: {selectedCustomer.name}</span>
-                    </div>
-                    {selectedCustomer.phone && (
-                      <span className="text-[11px] text-slate-500 font-mono" dir="ltr">{selectedCustomer.phone}</span>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
-                    <span className="text-slate-600">الدين السابق المستحق بذمته:</span>
-                    <span className={`font-mono font-bold ${selectedCustomer.totalDebt > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      {selectedCustomer.totalDebt > 0 ? formatMoney(selectedCustomer.totalDebt) : 'لا توجد ديون سابقة (خالص)'}
-                    </span>
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3">
+                <div className="space-y-1.5 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <span>المجموع الأولي:</span>
+                    <span className="font-bold text-slate-800">{formatMoney(subtotal)}</span>
                   </div>
 
-                  {saleType === 'credit' && remainingDebt > 0 && (
-                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-dashed border-amber-300 text-amber-950 font-bold">
-                      <span>إجمالي الدين الجديد بعد هذه القائمة:</span>
-                      <span className="font-mono text-xs text-rose-800 font-black">
-                        {formatMoney(newCustomerDebt)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {saleType === 'direct' && !selectedCustomerId && (
-                <div className="space-y-1 pt-1 border-t border-slate-200/60">
-                  <span className="text-[11px] font-bold text-slate-600 block">
-                    اسم الزبون غير المضاف (للوصل والطباعة - اختياري):
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="اسم الزبون غير المضاف..."
-                      value={customCustomerName}
-                      onChange={(e) => setCustomCustomerName(e.target.value)}
-                      className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="text"
-                      placeholder="رقم الهاتف (اختياري)..."
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {saleType === 'credit' && (
-                <div className="space-y-2 pt-2 border-t border-amber-200">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-amber-900 text-xs">المبلغ المسدد نقداً الآن:</span>
+                    <span>الخصم (مبلغ نقدي):</span>
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
                         min="0"
-                        max={finalTotal}
-                        value={paidAmount || ''}
+                        value={discount || ''}
                         placeholder="0"
-                        onChange={(e) => setPaidAmount(Math.max(0, parseFloat(e.target.value) || 0))}
-                        className="w-28 text-left px-2 py-1 text-xs font-bold border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-24 text-left px-2 py-0.5 text-xs font-bold border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       />
-                      <span className="text-amber-800 font-semibold text-xs">{settings.currency}</span>
+                      <span>{settings.currency}</span>
                     </div>
                   </div>
 
-                  <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200/60 text-xs">
-                    <span>المبلغ الآجل المتبقي بالدين:</span>
-                    <span className="text-rose-700">{formatMoney(remainingDebt)}</span>
+                  <div className="flex justify-between text-base font-extrabold text-slate-900 pt-1.5 border-t border-slate-200">
+                    <span>المبلغ المطلوب:</span>
+                    <span className="text-emerald-700">{formatMoney(finalTotal)}</span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1 text-xs">
-                    <span className="text-slate-600 flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-amber-700" />
-                      تاريخ استحقاق السداد:
-                    </span>
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="text-xs px-2 py-0.5 border border-slate-300 rounded bg-white text-slate-700"
-                    />
+                  <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded flex justify-between font-medium">
+                    <span>صافي الربح التقديري للقائمة:</span>
+                    <span className="font-bold">{formatMoney(estimatedProfit)}</span>
                   </div>
+                </div>
+
+                <div className={`p-3 rounded-2xl border flex flex-col gap-2.5 transition ${
+                  saleType === 'credit'
+                    ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
+                    : 'bg-slate-100/80 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className={`font-bold flex items-center gap-1.5 ${
+                      saleType === 'credit' ? 'text-amber-950 font-black' : 'text-slate-800'
+                    }`}>
+                      <UserCheck className={`w-4 h-4 ${saleType === 'credit' ? 'text-amber-700' : 'text-slate-600'}`} />
+                      <span>
+                        {saleType === 'credit' ? 'اختيار زبون آجل (مسجل مسبقاً):' : 'بيانات الزبون:'}
+                      </span>
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition shadow-2xs ${
+                        saleType === 'credit'
+                          ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                          : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-300'
+                      }`}
+                      title="إضافة واقتراح زبون جديد للنظام للتمكن من البيع بالآجل"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>+ اقتراح إضافة زبون</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      {saleType === 'credit' ? (
+                        <span className="text-amber-900">
+                          قائمة الزبائن المسجلين مسبقاً <span className="text-rose-600 font-extrabold">* (إلزامي للآجل)</span>:
+                        </span>
+                      ) : (
+                        <span>اختر زبون قديم مسجل مسبقاً (اختياري):</span>
+                      )}
+                    </label>
+
+                    <select
+                      value={selectedCustomerId}
+                      onChange={(e) => handleSelectCustomer(e.target.value)}
+                      className={`w-full text-xs bg-white border rounded-lg px-2.5 py-2 font-bold focus:outline-none focus:ring-2 ${
+                        saleType === 'credit'
+                          ? selectedCustomerId
+                            ? 'border-emerald-500 text-emerald-950 bg-emerald-50/20'
+                            : 'border-amber-400 text-amber-950 ring-1 ring-amber-300'
+                          : 'border-slate-300 text-slate-800 focus:ring-emerald-500'
+                      }`}
+                    >
+                      <option value="">
+                        {saleType === 'credit'
+                          ? '-- اضغط هنا لاختيار الزبون المسجل مسبقاً (إلزامي) --'
+                          : '-- زبون نقدي مباشر (بدون اختيار زبون مسجل) --'}
+                      </option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.phone ? `(${c.phone})` : ''} {c.totalDebt > 0 ? `· عليه دين: ${formatMoney(c.totalDebt)}` : '· (خالص)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {saleType === 'credit' && !selectedCustomerId && (
+                    <div className="bg-amber-100 border border-amber-300 text-amber-950 p-2.5 rounded-lg text-[11px] flex items-start gap-2 animate-fadeIn">
+                      <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="font-extrabold">لا يمكن البيع بالآجل إلا لزبون مضاف اسمه مسبقاً في النظام.</p>
+                        <p className="text-[10px] text-amber-800 mt-0.5">
+                          اختر الزبون من القائمة أعلاه، أو اضغط على زر الاقتراح لإضافته واعتماده فوراً:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenQuickAddCustomer(customCustomerName.trim() || undefined)}
+                          className="mt-1.5 px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-md font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span>اقتراح إضافة هذا الزبون الآن</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedCustomer && (
+                    <div className="bg-white border border-emerald-300 rounded-lg p-2.5 text-xs space-y-1.5 shadow-2xs">
+                      <div className="flex items-center justify-between font-bold text-slate-900">
+                        <div className="flex items-center gap-1.5 text-emerald-800">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>زبون معتمد: {selectedCustomer.name}</span>
+                        </div>
+                        {selectedCustomer.phone && (
+                          <span className="text-[11px] text-slate-500 font-mono" dir="ltr">{selectedCustomer.phone}</span>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                        <span className="text-slate-600">الدين السابق المستحق بذمته:</span>
+                        <span className={`font-mono font-bold ${selectedCustomer.totalDebt > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                          {selectedCustomer.totalDebt > 0 ? formatMoney(selectedCustomer.totalDebt) : 'لا توجد ديون سابقة (خالص)'}
+                        </span>
+                      </div>
+
+                      {saleType === 'credit' && remainingDebt > 0 && (
+                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-dashed border-amber-300 text-amber-950 font-bold">
+                          <span>إجمالي الدين الجديد بعد هذه القائمة:</span>
+                          <span className="font-mono text-xs text-rose-800 font-black">
+                            {formatMoney(newCustomerDebt)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {saleType === 'direct' && !selectedCustomerId && (
+                    <div className="space-y-1 pt-1 border-t border-slate-200/60">
+                      <span className="text-[11px] font-bold text-slate-600 block">
+                        اسم الزبون غير المضاف (للوصل والطباعة - اختياري):
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="اسم الزبون غير المضاف..."
+                          value={customCustomerName}
+                          onChange={(e) => setCustomCustomerName(e.target.value)}
+                          className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                        <input
+                          type="text"
+                          placeholder="رقم الهاتف (اختياري)..."
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {saleType === 'credit' && (
+                    <div className="space-y-2 pt-2 border-t border-amber-200">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-900 text-xs">المبلغ المسدد نقداً الآن:</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            max={finalTotal}
+                            value={paidAmount || ''}
+                            placeholder="0"
+                            onChange={(e) => setPaidAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                            className="w-28 text-left px-2 py-1 text-xs font-bold border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                          <span className="text-amber-800 font-semibold text-xs">{settings.currency}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between font-bold text-amber-950 pt-1 border-t border-amber-200/60 text-xs">
+                        <span>المبلغ الآجل المتبقي بالدين:</span>
+                        <span className="text-rose-700">{formatMoney(remainingDebt)}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 text-xs">
+                        <span className="text-slate-600 flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-amber-700" />
+                          تاريخ استحقاق السداد:
+                        </span>
+                        <input
+                          type="date"
+                          value={dueDate}
+                          onChange={(e) => setDueDate(e.target.value)}
+                          className="text-xs px-2 py-0.5 border border-slate-300 rounded bg-white text-slate-700"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="ملاحظات على القائمة (تظهر في الوصل)..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+
+                {cartErrorNotice && (
+                  <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fadeIn">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <div className="text-[11px] leading-tight">{cartErrorNotice}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCartErrorNotice(null)}
+                      className="text-rose-400 hover:text-rose-700 font-bold px-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+
+                {saleType === 'credit' && !selectedCustomerId && (
+                  <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <div className="flex-1 text-[11px] leading-tight">
+                      لا يمكن حفظ القائمة بالآجل إلا لزبون مضاف اسمه مسبقاً! يرجى اختيار زبون مسجل أو الضغط على زر الاقتراح لإضافته.
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
+                    onClick={() => handleSaveInvoice(true)}
+                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                    title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة'}
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>حفظ وطباعة القائمة</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
+                    onClick={() => handleSaveInvoice(false)}
+                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط دون طباعة'}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>حفظ فقط</span>
+                  </button>
+                </div>
+
+                {cartItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearCart}
+                    className="text-[11px] text-slate-500 hover:text-rose-600 text-center transition py-0.5 cursor-pointer"
+                  >
+                    تفريغ القائمة وإلغاء المواد
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={handleBarcodeScanned}
+        title="ماسح باركود نقطة البيع (POS)"
+      />
+
+      {showQuickAddModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">إضافة زبون جديد لسجل الديون</h3>
+                  <p className="text-[11px] text-slate-500">لا يمكن البيع بالآجل إلا لزبون معتمد ومسجل مسبقاً</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowQuickAddModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickCustomer} className="p-4 space-y-3">
+              {quickCustomerError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{quickCustomerError}</span>
                 </div>
               )}
 
-            </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  اسم الزبون الكامل <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="مثال: علي محمد حسن"
+                  value={quickCustomerName}
+                  onChange={(e) => setQuickCustomerName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                />
+              </div>
 
-            <input
-              type="text"
-              placeholder="ملاحظات على القائمة (تظهر في الوصل)..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            />
-
-            {cartErrorNotice && (
-              <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fadeIn">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <div className="text-[11px] leading-tight">{cartErrorNotice}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    رقم الهاتف (اختياري)
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="0770..."
+                    value={quickCustomerPhone}
+                    onChange={(e) => setQuickCustomerPhone(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                    dir="ltr"
+                  />
                 </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    العنوان / المنطقة (اختياري)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: الكرادة، بغداد"
+                    value={quickCustomerAddress}
+                    onChange={(e) => setQuickCustomerAddress(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  رصيد دين سابق إن وجد (اختياري)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={quickCustomerInitialDebt}
+                    onChange={(e) => setQuickCustomerInitialDebt(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                    className="w-full pl-12 pr-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                    {settings.currency || 'دينار'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  إذا كان على الزبون دين متبقي من فترات سابقة قبل استخدام البرنامج.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setCartErrorNotice(null)}
-                  className="text-rose-400 hover:text-rose-700 font-bold px-1"
+                  onClick={() => setShowQuickAddModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
                 >
-                  ×
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>حفظ واعتماد الزبون للبيع الآجل</span>
                 </button>
               </div>
-            )}
+            </form>
+          </div>
+        </div>
+      )}
 
-            {saleType === 'credit' && !selectedCustomerId && (
-              <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <div className="flex-1 text-[11px] leading-tight">
-                  لا يمكن حفظ القائمة بالآجل إلا لزبون مضاف اسمه مسبقاً! يرجى اختيار زبون مسجل أو الضغط على زر الاقتراح لإضافته.
+      {unfoundBarcodePrompt && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+            <div className="p-4 border-b border-amber-200 bg-amber-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center">
+                  <Scan className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-amber-950">مادة غير مسجلة في المخزن</h3>
+                  <p className="text-[11px] text-amber-800">تمت قراءة الرمز الشريطي بواسطة الماسح</p>
                 </div>
               </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
-                disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
-                onClick={() => handleSaveInvoice(true)}
-                className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
-                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ وطباعة القائمة'}
+                onClick={() => setUnfoundBarcodePrompt(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-amber-100 transition cursor-pointer"
               >
-                <Printer className="w-4 h-4" />
-                <span>حفظ وطباعة القائمة</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={cartItems.length === 0 || (saleType === 'credit' && !selectedCustomerId)}
-                onClick={() => handleSaveInvoice(false)}
-                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                title={saleType === 'credit' && !selectedCustomerId ? 'يرجى اختيار زبون مضاف مسبقاً لإتمام البيع بالآجل' : 'حفظ القائمة فقط دون طباعة'}
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>حفظ فقط</span>
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {cartItems.length > 0 && (
-              <button
-                type="button"
-                onClick={clearCart}
-                className="text-[11px] text-slate-500 hover:text-rose-600 text-center transition py-0.5 cursor-pointer"
-              >
-                تفريغ القائمة وإلغاء المواد
-              </button>
-            )}
-
-          </div>
-
-        </div>
-
-      </div>
-    )}
-
-  </div>
-
-  <BarcodeScannerModal
-    isOpen={isScannerOpen}
-    onClose={() => setIsScannerOpen(false)}
-    onScan={handleBarcodeScanned}
-    title="ماسح باركود نقطة البيع (POS)"
-  />
-
-  {showQuickAddModal && (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-700 flex items-center justify-center">
-              <UserPlus className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">إضافة زبون جديد لسجل الديون</h3>
-              <p className="text-[11px] text-slate-500">لا يمكن البيع بالآجل إلا لزبون معتمد ومسجل مسبقاً</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowQuickAddModal(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSaveQuickCustomer} className="p-4 space-y-3">
-          {quickCustomerError && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1.5">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{quickCustomerError}</span>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              اسم الزبون الكامل <span className="text-rose-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              autoFocus
-              placeholder="مثال: علي محمد حسن"
-              value={quickCustomerName}
-              onChange={(e) => setQuickCustomerName(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                رقم الهاتف (اختياري)
-              </label>
-              <input
-                type="tel"
-                placeholder="0770..."
-                value={quickCustomerPhone}
-                onChange={(e) => setQuickCustomerPhone(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
-                dir="ltr"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                العنوان / المنطقة (اختياري)
-              </label>
-              <input
-                type="text"
-                placeholder="مثال: الكرادة، بغداد"
-                value={quickCustomerAddress}
-                onChange={(e) => setQuickCustomerAddress(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              رصيد دين سابق إن وجد (اختياري)
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                min="0"
-                placeholder="0"
-                value={quickCustomerInitialDebt}
-                onChange={(e) => setQuickCustomerInitialDebt(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                className="w-full pl-12 pr-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
-              />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                {settings.currency || 'دينار'}
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-1">
-              إذا كان على الزبون دين متبقي من فترات سابقة قبل استخدام البرنامج.
-            </p>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setShowQuickAddModal(false)}
-              className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
-            >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>حفظ واعتماد الزبون للبيع الآجل</span>
-            </button>
-          </div>
-        </form>
-
-      </div>
-    </div>
-  )}
-
-  {unfoundBarcodePrompt && (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        <div className="p-4 border-b border-amber-200 bg-amber-50 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center">
-              <Scan className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-amber-950">مادة غير مسجلة في المخزن</h3>
-              <p className="text-[11px] text-amber-800">تمت قراءة الرمز الشريطي بواسطة الماسح</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setUnfoundBarcodePrompt(null)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-amber-100 transition cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
-            <div className="text-xs text-slate-500 font-bold mb-1">الرمز الشريطي (الباركود) المقروء:</div>
-            <div className="text-lg font-black font-mono text-slate-900 tracking-wider">
-              #{unfoundBarcodePrompt}
-            </div>
-          </div>
-
-          <p className="text-xs text-slate-700 leading-relaxed">
-            تمت قراءة هذا الرمز الشريطي بنجاح، ولكنه غير موجود ضمن المواد المخزنة حالياً.
-            <br />
-            <strong className="text-emerald-800">هل ترغب في إضافة هذه المادة الجديدة إلى المخزن الآن واعتماد هذا الرمز لها؟</strong>
-          </p>
-
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setUnfoundBarcodePrompt(null)}
-              className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
-            >
-              إلغاء
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const scanned = unfoundBarcodePrompt;
-                setUnfoundBarcodePrompt(null);
-                onOpenNewProduct(scanned);
-              }}
-              className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>+ إضافة المادة للمخزن الآن</span>
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  )}
-
-  {productForPriceEdit && (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
-        <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-              <Pencil className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">تعديل سعر المادة</h3>
-              <p className="text-[11px] text-blue-700 font-medium">
-                #{productForPriceEdit.code} · {productForPriceEdit.name}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setProductForPriceEdit(null)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-blue-100 transition cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSavePriceEdit} className="p-5 space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-800 mb-1">
-              سعر بيع المفرد ({settings.currency}) <span className="text-emerald-600 font-bold">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                min="0"
-                step="any"
-                required
-                value={editRetailPrice}
-                onChange={(e) => setEditRetailPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                {settings.currency}
-              </span>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-800 mb-1">
-              سعر بيع الجملة ({settings.currency})
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={editWholesalePrice}
-                onChange={(e) => setEditWholesalePrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
-              />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                {settings.currency}
-              </span>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-800 mb-1">
-              سعر الشراء / التكلفة ({settings.currency})
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                min="0"
-                step="any"
-                value={editCostPrice}
-                onChange={(e) => setEditCostPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
-              />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                {settings.currency}
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              سعة الكرتون الواحد (كم قطعة بالكرتون):
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="1"
-                value={editPiecesPerCarton}
-                onChange={(e) => setEditPiecesPerCarton(e.target.value === '' ? '' : parseInt(e.target.value) || 1)}
-                className="w-24 px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
-              />
-              <span className="text-xs text-slate-500 font-semibold">قطعة لكل كرتون</span>
-            </div>
-            {typeof editPiecesPerCarton === 'number' && editPiecesPerCarton > 1 && typeof editRetailPrice === 'number' && (
-              <div className="text-[11px] text-slate-600 mt-2 font-medium">
-                💡 سعر الكرتون المفرد = <span className="font-bold text-slate-900">{formatMoney(editRetailPrice * editPiecesPerCarton)}</span>
-                {typeof editWholesalePrice === 'number' && (
-                  <> · جملة = <span className="font-bold text-slate-900">{formatMoney(editWholesalePrice * editPiecesPerCarton)}</span></>
-                )}
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                <div className="text-xs text-slate-500 font-bold mb-1">الرمز الشريطي (الباركود) المقروء:</div>
+                <div className="text-lg font-black font-mono text-slate-900 tracking-wider">
+                  #{unfoundBarcodePrompt}
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-            {onEditProduct && (
-              <button
-                type="button"
-                onClick={() => {
-                  const prod = productForPriceEdit;
-                  setProductForPriceEdit(null);
-                  onEditProduct(prod);
-                }}
-                className="text-xs text-blue-700 hover:text-blue-900 underline font-semibold cursor-pointer"
-              >
-                تعديل كامل بيانات المادة
-              </button>
-            )}
-            <div className="flex items-center gap-2 mr-auto">
+              <p className="text-xs text-slate-700 leading-relaxed">
+                تمت قراءة هذا الرمز الشريطي بنجاح، ولكنه غير موجود ضمن المواد المخزنة حالياً.
+                <br />
+                <strong className="text-emerald-800">هل ترغب في إضافة هذه المادة الجديدة إلى المخزن الآن واعتماد هذا الرمز لها؟</strong>
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setUnfoundBarcodePrompt(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const scanned = unfoundBarcodePrompt;
+                    setUnfoundBarcodePrompt(null);
+                    onOpenNewProduct(scanned);
+                  }}
+                  className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ إضافة المادة للمخزن الآن</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {productForPriceEdit && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden text-right" dir="rtl">
+            <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <Pencil className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">تعديل سعر المادة</h3>
+                  <p className="text-[11px] text-blue-700 font-medium">
+                    #{productForPriceEdit.code} · {productForPriceEdit.name}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setProductForPriceEdit(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-blue-100 transition cursor-pointer"
               >
-                إلغاء
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>حفظ السعر</span>
+                <X className="w-4 h-4" />
               </button>
             </div>
+
+            <form onSubmit={handleSavePriceEdit} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  سعر بيع المفرد ({settings.currency}) <span className="text-emerald-600 font-bold">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                    value={editRetailPrice}
+                    onChange={(e) => setEditRetailPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                    className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    {settings.currency}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  سعر بيع الجملة ({settings.currency})
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={editWholesalePrice}
+                    onChange={(e) => setEditWholesalePrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                    className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    {settings.currency}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  سعر الشراء / التكلفة ({settings.currency})
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={editCostPrice}
+                    onChange={(e) => setEditCostPrice(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                    className="w-full pl-12 pr-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    {settings.currency}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سعة الكرتون الواحد (كم قطعة بالكرتون):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={editPiecesPerCarton}
+                    onChange={(e) => setEditPiecesPerCarton(e.target.value === '' ? '' : parseInt(e.target.value) || 1)}
+                    className="w-24 px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                  />
+                  <span className="text-xs text-slate-500 font-semibold">قطعة لكل كرتون</span>
+                </div>
+                {typeof editPiecesPerCarton === 'number' && editPiecesPerCarton > 1 && typeof editRetailPrice === 'number' && (
+                  <div className="text-[11px] text-slate-600 mt-2 font-medium">
+                    💡 سعر الكرتون المفرد = <span className="font-bold text-slate-900">{formatMoney(editRetailPrice * editPiecesPerCarton)}</span>
+                    {typeof editWholesalePrice === 'number' && (
+                      <> · جملة = <span className="font-bold text-slate-900">{formatMoney(editWholesalePrice * editPiecesPerCarton)}</span></>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                {onEditProduct && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const prod = productForPriceEdit;
+                      setProductForPriceEdit(null);
+                      onEditProduct(prod);
+                    }}
+                    className="text-xs text-blue-700 hover:text-blue-900 underline font-semibold cursor-pointer"
+                  >
+                    تعديل كامل بيانات المادة
+                  </button>
+                )}
+                <div className="flex items-center gap-2 mr-auto">
+                  <button
+                    type="button"
+                    onClick={() => setProductForPriceEdit(null)}
+                    className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>حفظ السعر</span>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
-        </form>
-
-      </div>
+        </div>
+      )}
     </div>
-  )}
-
-</div>
   );
 };
 
