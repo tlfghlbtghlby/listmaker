@@ -206,6 +206,7 @@ export interface StoreSettings {
   invoiceFooterNote: string;
   printFormat: PrintFormatType; // A4 أو A5 أو رول 80 مم أو رول 58 مم
   directPrintEnabled?: boolean; // تفعيل الطباعة الفورية الصامتة بدون نافذة حوار
+  selectedPrinterName?: string; // اسم طابعة الكاشير المحددة للطباعة اللحظية في أقل من ثانية
   printerPaperSize?: PrintFormatType | string; // مقاس ورق الطابعة
   enableWholesale: boolean; // تفعيل أو إلغاء إظهار سعر بيع الجملة
   deviceMode: DeviceMode; // وضع الحاسبة أو وضع الهاتف (Android / iPhone)
@@ -223,6 +224,9 @@ export interface StoreSettings {
   supervisorPermissions?: Partial<RolePermissions>; // تخصيص صلاحيات المشرف
   defaultSessionOnLaunch?: SessionRole; // الجلسة الافتراضية عند فتح البرنامج
 }
+
+// اسم مستعار لضمان التوافق مع أي استدعاء باسم Settings في التطبيق
+export type Settings = StoreSettings;
 
 export type SessionRole = 'admin' | 'supervisor' | 'employee';
 
