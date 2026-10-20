@@ -387,12 +387,12 @@ export const QuickAddProducts: React.FC = () => {
                 {isSaving ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>جاري الحفظ بالسحاب ({progress}%)...</span>
+                    <span>جاري الرفع إلى Firestore ({progress}%)...</span>
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    <span>حفظ وإضافة للمخزن السحابي الآن ({parsedItems.length})</span>
+                    <span>تأكيد الحفظ وإضافة كافة المواد إلى المخزن السحابي ({parsedItems.length})</span>
                   </>
                 )}
               </button>
