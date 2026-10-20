@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, writeBatch } from 'firebase/firestore';
 import { sanitizeForFirestore } from '../context/AppContext';
 import { Product } from '../types';
 import { 
@@ -12,7 +12,6 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   RefreshCw, 
-  Plus, 
   FileSpreadsheet,
   Trash2,
   Sparkles
@@ -37,7 +36,7 @@ interface ParsedItem {
 }
 
 export const QuickAddProducts: React.FC = () => {
-  const { products, setSyncNotice, formatMoney, settings } = useApp();
+  const { products, setSyncNotice, formatMoney, currentUser } = useApp();
   
   const [inputText, setInputText] = useState<string>('');
   const [parsedItems, setParsedItems] = useState<ParsedItem[]>([]);
@@ -47,12 +46,10 @@ export const QuickAddProducts: React.FC = () => {
   const [successCount, setSuccessCount] = useState<number | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
 
-  // Example placeholder
   const exampleText = `بيض, 12, 6000, 72000, 6500, 78000, 1ك
 حليب نيدو, 6, 24000, 0, 27000, 0, 5ك, 25500, 0
 زيت طعام, 12, 3000, 36000, 3500, 42000, 24ق, 3250, 39000, 890123456789`;
 
-  // توليد باركود عشوائي فريد مكون من 12 رقماً
   const generateUniqueBarcode = (existingCodes: Set<string>): string => {
     let code = '';
     do {
@@ -63,14 +60,12 @@ export const QuickAddProducts: React.FC = () => {
     return code;
   };
 
-  // معالجة وتحليل سطر واحد وفق القواعد المحددة بدقة
   const parseLine = (line: string, index: number, usedCodes: Set<string>): ParsedItem | null => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) {
       return null;
     }
 
-    // تقسيم بالفاصلة العربية أو الإنجليزية
     const parts = trimmed.split(/[,،]/).map(p => p.trim());
     if (parts.length === 0 || !parts[0]) {
       return null;
@@ -93,29 +88,24 @@ export const QuickAddProducts: React.FC = () => {
     let barcode = (parts[9] || '').trim();
     let autoBarcode = false;
 
-    // 1. قواعد الحساب التلقائي للأسعار عند وضع صفر 0 أو تركها فارغة:
-    // التكلفة:
     if (costBox === 0 && costPiece > 0) {
       costBox = costPiece * piecesPerBox;
     } else if (costPiece === 0 && costBox > 0) {
       costPiece = Math.round(costBox / piecesPerBox);
     }
 
-    // بيع المفرد:
     if (retailPriceBox === 0 && retailPricePiece > 0) {
       retailPriceBox = retailPricePiece * piecesPerBox;
     } else if (retailPricePiece === 0 && retailPriceBox > 0) {
       retailPricePiece = Math.round(retailPriceBox / piecesPerBox);
     }
 
-    // بيع الجملة (الحساب التبادلي اختياري):
     if (wholesalePriceBox === 0 && wholesalePricePiece > 0) {
       wholesalePriceBox = wholesalePricePiece * piecesPerBox;
     } else if (wholesalePricePiece === 0 && wholesalePriceBox > 0) {
       wholesalePricePiece = Math.round(wholesalePriceBox / piecesPerBox);
     }
 
-    // 2. المخزن (ق / ك):
     let stock = 0;
     const cleanStock = rawStock.trim();
     if (cleanStock.endsWith('ك') || cleanStock.endsWith('K') || cleanStock.endsWith('k') || cleanStock.includes('كرتون')) {
@@ -125,12 +115,10 @@ export const QuickAddProducts: React.FC = () => {
       const numPieces = parseFloat(cleanStock.replace(/[^0-9.]/g, '')) || 0;
       stock = Math.round(numPieces);
     } else {
-      // الرقم مجرد: يُعتبر كقطع افتراضياً
       const numPieces = parseFloat(cleanStock.replace(/[^0-9.]/g, '')) || 0;
       stock = Math.round(numPieces);
     }
 
-    // 3. الباركود: إذا تُرِك فارغاً، يتم توليد باركود عشوائي فريد تلقائياً (12 رقماً)
     if (!barcode) {
       barcode = generateUniqueBarcode(usedCodes);
       autoBarcode = true;
@@ -159,7 +147,6 @@ export const QuickAddProducts: React.FC = () => {
     };
   };
 
-  // تفكيك النص ومعاينته
   const handlePreview = () => {
     setParseError(null);
     setSuccessCount(null);
@@ -186,12 +173,10 @@ export const QuickAddProducts: React.FC = () => {
     setIsPreviewed(true);
   };
 
-  // إزالة عنصر من جدول المعاينة
   const handleRemoveParsedItem = (index: number) => {
     setParsedItems(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  // حفظ المواد ورفعها دفعة واحدة إلى Firestore (collection "items")
   const handleSaveToFirestore = async () => {
     if (parsedItems.length === 0) return;
 
@@ -200,40 +185,48 @@ export const QuickAddProducts: React.FC = () => {
     setSuccessCount(null);
 
     const now = new Date().toISOString();
-    let saved = 0;
+    const currentUid = currentUser?.uid || '';
     const total = parsedItems.length;
+    const batchSize = 400;
 
     try {
-      for (let i = 0; i < total; i++) {
-        const item = parsedItems[i];
-        const newProduct: Product = {
-          id: item.id,
-          code: item.barcode,
-          name: item.name,
-          category: 'عام',
-          unit: 'قطعة',
-          costPrice: item.costPiece,
-          retailPrice: item.retailPricePiece,
-          wholesalePrice: item.wholesalePricePiece || item.retailPricePiece,
-          stock: item.stock,
-          piecesPerCarton: item.piecesPerBox,
-          minStock: 5,
-          createdAt: now,
-          updatedAt: now,
-        };
+      for (let i = 0; i < total; i += batchSize) {
+        const chunk = parsedItems.slice(i, i + batchSize);
+        const batch = writeBatch(db);
 
-        // رفع مباشر إلى Firestore collection 'items'
-        await setDoc(doc(db, 'items', item.id), sanitizeForFirestore(newProduct), { merge: true });
-        saved++;
-        setProgress(Math.round((saved / total) * 100));
+        chunk.forEach(item => {
+          const newProduct: Product = {
+            id: item.id,
+            code: item.barcode,
+            name: item.name,
+            category: 'عام',
+            unit: 'قطعة',
+            costPrice: item.costPiece,
+            retailPrice: item.retailPricePiece,
+            wholesalePrice: item.wholesalePricePiece || item.retailPricePiece,
+            stock: item.stock,
+            piecesPerCarton: item.piecesPerBox,
+            minStock: 5,
+            ownerUid: currentUid,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          const docRef = doc(db, 'items', item.id);
+          batch.set(docRef, sanitizeForFirestore(newProduct), { merge: true });
+        });
+
+        await batch.commit();
+        const currentDone = Math.min(i + batchSize, total);
+        setProgress(Math.round((currentDone / total) * 100));
       }
 
-      setSuccessCount(saved);
+      setSuccessCount(total);
       setInputText('');
       setParsedItems([]);
       setIsPreviewed(false);
       if (setSyncNotice) {
-        setSyncNotice(`تمت إضافة ${saved} مادة جديدة بنجاح إلى المخزن والسحاب!`);
+        setSyncNotice(`تمت إضافة ${total} مادة جديدة بنجاح إلى المخزن والسحاب!`);
       }
     } catch (err: any) {
       console.error('Error saving quick products to Firestore:', err);
@@ -245,8 +238,6 @@ export const QuickAddProducts: React.FC = () => {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-      
-      {/* Header */}
       <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-l from-emerald-50/50 to-white">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
@@ -276,8 +267,6 @@ export const QuickAddProducts: React.FC = () => {
       </div>
 
       <div className="p-6 space-y-5">
-
-        {/* Format Rules Guide */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-2.5">
           <div className="flex items-center gap-2 font-bold text-slate-800">
             <HelpCircle className="w-4 h-4 text-blue-600 shrink-0" />
@@ -304,7 +293,6 @@ export const QuickAddProducts: React.FC = () => {
           </div>
         </div>
 
-        {/* Input Textarea */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -329,7 +317,6 @@ export const QuickAddProducts: React.FC = () => {
           />
         </div>
 
-        {/* Error / Alert notice */}
         {parseError && (
           <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-bold text-rose-800 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
@@ -337,7 +324,6 @@ export const QuickAddProducts: React.FC = () => {
           </div>
         )}
 
-        {/* Success Notice */}
         {successCount !== null && (
           <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 flex items-center justify-between shadow-2xs animate-fadeIn">
             <div className="flex items-center gap-2.5">
@@ -350,7 +336,6 @@ export const QuickAddProducts: React.FC = () => {
           </div>
         )}
 
-        {/* Action Buttons: Preview & Clear */}
         <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <button
@@ -380,7 +365,6 @@ export const QuickAddProducts: React.FC = () => {
           </div>
         </div>
 
-        {/* Preview Table with calculated values */}
         {isPreviewed && parsedItems.length > 0 && (
           <div className="space-y-4 pt-3 border-t border-slate-200 animate-fadeIn">
             <div className="flex items-center justify-between">
@@ -394,7 +378,6 @@ export const QuickAddProducts: React.FC = () => {
                 </p>
               </div>
 
-              {/* Save Button in table header */}
               <button
                 type="button"
                 disabled={isSaving || parsedItems.some(i => !i.isValid)}
@@ -415,7 +398,6 @@ export const QuickAddProducts: React.FC = () => {
               </button>
             </div>
 
-            {/* Progress Bar during Firestore write */}
             {isSaving && (
               <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
                 <div
@@ -425,7 +407,6 @@ export const QuickAddProducts: React.FC = () => {
               </div>
             )}
 
-            {/* Table */}
             <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
               <table className="w-full text-right text-xs">
                 <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
@@ -451,15 +432,12 @@ export const QuickAddProducts: React.FC = () => {
                       <td className="py-2.5 px-3 font-bold text-slate-900">{item.name}</td>
                       <td className="py-2.5 px-3 text-center font-mono">{item.piecesPerBox} قطعة</td>
                       
-                      {/* Cost */}
                       <td className="py-2.5 px-3 font-mono text-slate-700">{formatMoney(item.costPiece)}</td>
                       <td className="py-2.5 px-3 font-mono text-slate-700">{formatMoney(item.costBox)}</td>
 
-                      {/* Retail */}
                       <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">{formatMoney(item.retailPricePiece)}</td>
                       <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">{formatMoney(item.retailPriceBox)}</td>
 
-                      {/* Wholesale */}
                       <td className="py-2.5 px-3 font-mono text-amber-800">
                         {item.wholesalePricePiece > 0 ? formatMoney(item.wholesalePricePiece) : '-'}
                       </td>
@@ -467,7 +445,6 @@ export const QuickAddProducts: React.FC = () => {
                         {item.wholesalePriceBox > 0 ? formatMoney(item.wholesalePriceBox) : '-'}
                       </td>
 
-                      {/* Stock */}
                       <td className="py-2.5 px-3 text-center">
                         <span className="inline-block px-2 py-0.5 rounded-full font-mono font-bold text-xs bg-slate-100 text-slate-800 border border-slate-200">
                           {item.stock} قطعة
@@ -479,7 +456,6 @@ export const QuickAddProducts: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Barcode */}
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">
                         <div className="flex items-center gap-1">
                           <span>{item.barcode}</span>
@@ -491,7 +467,6 @@ export const QuickAddProducts: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* Delete */}
                       <td className="py-2.5 px-2 text-center">
                         <button
                           type="button"
@@ -508,7 +483,6 @@ export const QuickAddProducts: React.FC = () => {
               </table>
             </div>
 
-            {/* Bottom Save Button */}
             <div className="flex justify-end pt-2">
               <button
                 type="button"
@@ -531,7 +505,6 @@ export const QuickAddProducts: React.FC = () => {
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
