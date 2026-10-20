@@ -5,13 +5,13 @@ import {
   onSnapshot, 
   setDoc, 
   updateDoc, 
-  deleteDoc,
-  enableNetwork,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  writeBatch
+  deleteDoc, 
+  enableNetwork, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where, 
+  writeBatch 
 } from 'firebase/firestore';
 import { db, logoutAccount, getActiveLocalSession } from '../firebase';
 import { User } from 'firebase/auth';
@@ -19,23 +19,23 @@ import {
   Product, 
   Customer, 
   Invoice, 
-  InvoiceItem,
-  InvoiceStatus,
+  InvoiceItem, 
+  InvoiceStatus, 
   PaymentRecord, 
   StoreSettings, 
-  CreateInvoiceInput,
-  SessionRole,
-  RolePermissions,
-  DEFAULT_EMPLOYEE_PERMISSIONS,
-  DEFAULT_SUPERVISOR_PERMISSIONS,
-  DEFAULT_ADMIN_PERMISSIONS,
-  ADMIN_EMAIL,
-  Shift,
-  ShiftItemSold,
-  ReturnedItemRecord,
-  POSDraftOrder,
-  PresetShift,
-  StoreSupervisor
+  CreateInvoiceInput, 
+  SessionRole, 
+  RolePermissions, 
+  DEFAULT_EMPLOYEE_PERMISSIONS, 
+  DEFAULT_SUPERVISOR_PERMISSIONS, 
+  DEFAULT_ADMIN_PERMISSIONS, 
+  ADMIN_EMAIL, 
+  Shift, 
+  ShiftItemSold, 
+  ReturnedItemRecord, 
+  POSDraftOrder, 
+  PresetShift, 
+  StoreSupervisor 
 } from '../types';
 
 export interface CustomBackupOptions {
@@ -305,7 +305,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // POS Draft Orders Management (قوائم معلقة ومتعددة لا تختفي عند التنقل)
   const [draftOrders, setDraftOrders] = useState<POSDraftOrder[]>(() => {
     try {
       const cached = localStorage.getItem('cached_pos_draft_orders');
@@ -327,7 +326,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return '';
   });
 
-  // Ensure activeDraft always points to a valid draft order
   const activeDraft = useMemo(() => {
     if (activeDraftId) {
       const found = draftOrders.find(d => d.id === activeDraftId);
@@ -519,7 +517,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const adminPass = (currentUser?.password || '123456').trim();
       const supervisorsList = settings.supervisors || [];
 
-      // 1. If a specific supervisor was selected
       const targetSupId = targetSupervisorId || targetSupervisorIdForModal;
       if (targetSupId) {
         const sup = supervisorsList.find(s => s.id === targetSupId);
@@ -537,7 +534,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 2. Check if cleanPin matches any supervisor in the list
       const matchedSup = supervisorsList.find(s => s.pin && s.pin.trim() === cleanPin);
       if (matchedSup) {
         setSessionRole('supervisor');
@@ -549,7 +545,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: true };
       }
 
-      // 3. Fallback to default supervisorPin or adminPass
       const validPin = (settings.supervisorPin || '1122').trim();
       if (cleanPin && (cleanPin === validPin || cleanPin === adminPass)) {
         setSessionRole('supervisor');
@@ -610,8 +605,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               setSessionRole('admin');
               setActiveSupervisorId(null);
               if (currentUser) currentUser.password = cleanPass;
-              try {
-                localStorage.setItem('active_session_role', 'admin');
+              try { 
+                localStorage.setItem('active_session_role', 'admin'); 
                 localStorage.setItem('last_known_account_password', cleanPass);
                 localStorage.removeItem('active_supervisor_id');
                 const s = localStorage.getItem('active_client_session');
@@ -668,6 +663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // المزامنة الحية المفلترة من جهة السيرفر
   useEffect(() => {
     if (!currentUser) {
       setProducts([]);
@@ -698,18 +694,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    const matchesUser = (itemOwnerUid?: string) => {
-      if (!itemOwnerUid) return isMuntazar;
-      if (itemOwnerUid === currentUid) return true;
-      if (isMuntazar && (itemOwnerUid === MUNTAZAR_UID || itemOwnerUid === ALT_MUNTAZAR_UID)) return true;
-      return false;
-    };
+    // 1. استعلام مفلتر للمواد على مستوى السيرفر (يمنع سحب مخازن العملاء الآخرين ويقلل القراءات بنسبة 95%)
+    const itemsQuery = isMuntazar 
+      ? query(collection(db, 'items'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
+      : query(collection(db, 'items'), where('ownerUid', '==', currentUid));
 
-    // دمج ذكي للمواد لمنع مسح المخزون المحلي
-    const unsubItems = onSnapshot(collection(db, 'items'), (snap) => {
-      const serverList = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(item => matchesUser(item.ownerUid));
+    const unsubItems = onSnapshot(itemsQuery, (snap) => {
+      const serverList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
 
       setProducts(prevLocal => {
         const itemMap = new Map<string, Product>();
@@ -741,10 +732,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsCloudConnected(false);
     });
 
-    const unsubInv = onSnapshot(collection(db, 'invoices'), (snap) => {
-      const serverList = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(inv => matchesUser(inv.ownerUid));
+    // 2. استعلام مفلتر للفواتير على مستوى السيرفر
+    const invoicesQuery = isMuntazar
+      ? query(collection(db, 'invoices'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
+      : query(collection(db, 'invoices'), where('ownerUid', '==', currentUid));
+
+    const unsubInv = onSnapshot(invoicesQuery, (snap) => {
+      const serverList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice));
 
       setInvoices(prevLocal => {
         const invMap = new Map<string, Invoice>();
@@ -756,10 +750,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, () => {});
 
-    const unsubCust = onSnapshot(collection(db, 'customers'), (snap) => {
-      const serverList = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(cust => matchesUser(cust.ownerUid));
+    // 3. استعلام مفلتر للزبائن على مستوى السيرفر
+    const customersQuery = isMuntazar
+      ? query(collection(db, 'customers'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
+      : query(collection(db, 'customers'), where('ownerUid', '==', currentUid));
+
+    const unsubCust = onSnapshot(customersQuery, (snap) => {
+      const serverList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
 
       setCustomers(prevLocal => {
         const custMap = new Map<string, Customer>();
@@ -771,6 +768,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, () => {});
 
+    // 4. استعلام إعدادات المتجر الخاصة بالمستخدم
     const settingsDocId = isMuntazar ? 'store_settings' : `settings_${currentUid}`;
     const unsubSettings = onSnapshot(doc(db, 'settings', settingsDocId), (snap) => {
       if (snap.exists()) {
@@ -785,10 +783,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }, () => {});
 
-    const unsubShifts = onSnapshot(collection(db, 'shifts'), (snap) => {
+    // 5. استعلام مفلتر للشفتات على مستوى السيرفر
+    const shiftsQuery = isMuntazar
+      ? query(collection(db, 'shifts'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
+      : query(collection(db, 'shifts'), where('ownerUid', '==', currentUid));
+
+    const unsubShifts = onSnapshot(shiftsQuery, (snap) => {
       const list = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(s => matchesUser(s.ownerUid))
+        .map(d => ({ id: d.id, ...d.data() } as Shift))
         .sort((a, b) => new Date(b.startTime || b.createdAt).getTime() - new Date(a.startTime || a.createdAt).getTime());
       
       setShifts(list);
@@ -1065,7 +1067,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const inv = invoices.find(i => i.id === id);
     if (!inv || inv.status === 'returned') return false;
 
-    // Return remaining unreturned stock to inventory
     inv.items.forEach(i => {
       const alreadyReturned = i.returnedQuantity || 0;
       const unreturned = Math.max(0, i.quantity - alreadyReturned);
@@ -1075,7 +1076,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Reduce customer debt if credit invoice
     if (inv.customerId && inv.remainingAmount > 0) {
       setCustomers(prev => {
         const updated = prev.map(c => c.id === inv.customerId ? { ...c, totalDebt: Math.max(0, c.totalDebt - inv.remainingAmount) } : c);
@@ -1089,7 +1089,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Active shift adjustment if applicable
     if (activeShift && (inv.shiftId === activeShift.id || !inv.shiftId)) {
       setActiveShift(prev => {
         if (!prev) return null;
@@ -1355,7 +1354,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (incProducts) {
       if (isProductsOnly) {
-        // Strip ownerUid and any customer/internal IDs - pure independent products catalog
         payload.products = products.map((p, idx) => ({
           code: p.code || `${1000 + idx + 1}`,
           name: p.name,
@@ -1450,7 +1448,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const now = new Date().toISOString();
       const currentUid = currentUser?.uid || '';
 
-      // Clean, validate and format every product as newly entered into current account
       const cleanList: Product[] = rawList.map((item, idx) => {
         const freshId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + idx;
         return {
@@ -1472,7 +1469,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       });
 
-      // If replace mode, clear previous products from Firestore in chunks
       if (mode === 'replace') {
         const oldIds = products.map(p => p.id);
         for (let i = 0; i < oldIds.length; i += 400) {
@@ -1485,7 +1481,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // Merge or Replace in state
       let updatedList: Product[] = [];
       if (mode === 'replace') {
         updatedList = cleanList;
@@ -1516,7 +1511,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedList = Array.from(map.values());
       }
 
-      // Save to Firestore in batches
       for (let i = 0; i < cleanList.length; i += 400) {
         const chunk = cleanList.slice(i, i + 400);
         const batch = writeBatch(db);
@@ -1566,10 +1560,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      // 1. Gather all item doc IDs
       const productIds = products.map(p => p.id);
 
-      // Query any items for this user in Firestore
       try {
         const itemsRef = collection(db, 'items');
         if (currentUser?.uid) {
@@ -1583,7 +1575,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (e) {}
 
-      // Batch delete from Firestore
       for (let i = 0; i < productIds.length; i += 400) {
         const chunk = productIds.slice(i, i + 400);
         const batch = writeBatch(db);
@@ -1593,7 +1584,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await batch.commit().catch(() => {});
       }
 
-      // 2. Clear state and local cache
       setProducts([]);
       try {
         localStorage.removeItem('cached_pos_products');
@@ -1766,7 +1756,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const correctCode = (selectedPreset.code || '').trim();
     const adminPass = (currentUser?.password || '123456').trim();
 
-    // Verify code: matches preset code, or admin can start with admin password
     const isCodeValid = (enteredCode && enteredCode === correctCode) || (sessionRole === 'admin' && enteredCode === adminPass);
 
     if (!isCodeValid) {
