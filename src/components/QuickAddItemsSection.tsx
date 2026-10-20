@@ -64,6 +64,7 @@ const SAMPLE_TEXT = `بيض, 12, 6000, 72000, 6500, 78000, 1ك
 معجون أسنان كولجيت, 12, 1000, 12000, 1500, 18000, 20ق, 0, 0, 629100123456`;
 
 export const QuickAddItemsSection: React.FC = () => {
+  // ✅ تم استدعاء currentUser لضمان نسبة المواد لمالكها
   const { products, addBulkProducts, formatMoney, setSyncNotice, currentUser } = useApp();
 
   const [rawText, setRawText] = useState('');
@@ -74,12 +75,10 @@ export const QuickAddItemsSection: React.FC = () => {
   const [uploadSuccessCount, setUploadSuccessCount] = useState<number | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
-  // Set of all existing barcodes to guarantee uniqueness
   const existingCodesSet = useMemo(() => {
     return new Set(products.map((p) => p.code.trim().toLowerCase()));
   }, [products]);
 
-  // Parser logic following the strict user specifications
   const parseLines = (text: string): ParsedQuickItem[] => {
     const lines = text.split('\n');
     const existing = new Set(existingCodesSet);
@@ -96,14 +95,12 @@ export const QuickAddItemsSection: React.FC = () => {
         errors.push('اسم المادة مطلوب');
       }
 
-      // 1. Pieces per box
       const rawPiecesStr = normalizeArabicNumbers(rawParts[1] || '');
       let piecesPerBox = parseInt(rawPiecesStr, 10);
       if (isNaN(piecesPerBox) || piecesPerBox <= 0) {
         piecesPerBox = 1;
       }
 
-      // 2. Cost prices: costPiece & costBox
       const rawCostPieceStr = normalizeArabicNumbers(rawParts[2] || '');
       const rawCostBoxStr = normalizeArabicNumbers(rawParts[3] || '');
       let costPiece = parseFloat(rawCostPieceStr) || 0;
@@ -121,7 +118,6 @@ export const QuickAddItemsSection: React.FC = () => {
         costCalcReason = `حُسبت القطعة: ${costBox} ÷ ${piecesPerBox}`;
       }
 
-      // 3. Retail prices: retailPricePiece & retailPriceBox
       const rawRetailPieceStr = normalizeArabicNumbers(rawParts[4] || '');
       const rawRetailBoxStr = normalizeArabicNumbers(rawParts[5] || '');
       let retailPricePiece = parseFloat(rawRetailPieceStr) || 0;
@@ -139,7 +135,6 @@ export const QuickAddItemsSection: React.FC = () => {
         retailCalcReason = `حُسبت القطعة بالمفرد: ${retailPriceBox} ÷ ${piecesPerBox}`;
       }
 
-      // 4. Stock quantity: with 'ق' or 'ك'
       const rawStockStr = normalizeArabicNumbers(rawParts[6] || '');
       let stockInput = rawParts[6] || '0';
       let totalStockPieces = 0;
@@ -162,7 +157,6 @@ export const QuickAddItemsSection: React.FC = () => {
         stockUnitLabel = '0 قطعة';
       }
 
-      // 5. Wholesale prices: wholesalePricePiece & wholesalePriceBox (optional)
       const rawWholesalePieceStr = normalizeArabicNumbers(rawParts[7] || '');
       const rawWholesaleBoxStr = normalizeArabicNumbers(rawParts[8] || '');
       const hasWholesalePieceInput = rawParts[7] !== undefined && rawParts[7].trim() !== '';
@@ -185,7 +179,6 @@ export const QuickAddItemsSection: React.FC = () => {
         }
       }
 
-      // 6. Barcode:
       const rawBarcode = (rawParts[9] || '').trim();
       let barcode = rawBarcode;
       let isAutoBarcode = false;
@@ -262,7 +255,7 @@ export const QuickAddItemsSection: React.FC = () => {
 
     const currentUid = currentUser?.uid || '';
 
-    // إسناد ownerUid مباشرة مع الكائنات المحفوظة لمطابقة الاستعلام المفلتر
+    // ✅ تضمين ownerUid لحفظ حقوق المواد للعميل نفسه فقط
     const itemsToSave: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[] = validItems.map((item) => ({
       name: item.name.trim(),
       code: item.barcode.trim(),
@@ -306,7 +299,6 @@ export const QuickAddItemsSection: React.FC = () => {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden space-y-6 p-5 sm:p-6">
-      {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
@@ -354,7 +346,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Success Notification Alert */}
       {uploadSuccessCount !== null && (
         <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 flex items-start sm:items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-3">
@@ -380,7 +371,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       )}
 
-      {/* Inline Error Notice */}
       {inlineError && (
         <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 flex items-center justify-between gap-3 text-xs shadow-xs">
           <div className="flex items-center gap-2">
@@ -397,7 +387,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       )}
 
-      {/* Instruction & Format Guide Box */}
       <div className="bg-gradient-to-r from-amber-50/70 via-slate-50 to-blue-50/70 border border-amber-200/70 rounded-xl p-4 text-xs space-y-2.5">
         <div className="flex items-center gap-2 font-black text-slate-800">
           <Info className="w-4 h-4 text-amber-600 shrink-0" />
@@ -441,7 +430,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Textarea Input */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs font-bold text-slate-700">
           <label htmlFor="quick-add-textarea" className="flex items-center gap-1.5">
@@ -468,7 +456,6 @@ export const QuickAddItemsSection: React.FC = () => {
           className="w-full p-3.5 text-xs sm:text-sm font-mono border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-slate-50/50 leading-relaxed"
         />
 
-        {/* Action Button: Preview */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <div className="text-[11px] text-slate-500">
             اضغط على زر "معاينة المواد" للتحقق من دقة الحسابات والباركود قبل رفعها إلى السحابة.
@@ -490,7 +477,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Upload Progress Bar */}
       {isUploading && uploadProgress && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-2">
           <div className="flex items-center justify-between text-xs font-bold text-blue-900">
@@ -509,7 +495,6 @@ export const QuickAddItemsSection: React.FC = () => {
         </div>
       )}
 
-      {/* Preview Table Section */}
       {hasPreviewed && parsedItems.length > 0 && (
         <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs space-y-3 pt-3 bg-slate-50/50">
           <div className="px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -669,7 +654,6 @@ export const QuickAddItemsSection: React.FC = () => {
             </table>
           </div>
 
-          {/* Bottom Save Trigger */}
           <div className="p-4 bg-slate-100/80 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="text-xs text-slate-600">
               جاهز لحفظ <strong>{validCount}</strong> مادة ورفعها مباشرة إلى Firestore.
