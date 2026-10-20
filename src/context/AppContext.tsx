@@ -32,7 +32,8 @@ import {
   ADMIN_EMAIL,
   Shift,
   ShiftItemSold,
-  ReturnedItemRecord
+  ReturnedItemRecord,
+  POSDraftOrder
 } from '../types';
 
 export interface CustomBackupOptions {
@@ -52,6 +53,15 @@ interface AppContextType {
   invoices: Invoice[];
   payments: PaymentRecord[];
   settings: StoreSettings;
+  draftOrders: POSDraftOrder[];
+  activeDraftId: string;
+  activeDraft: POSDraftOrder;
+  updateActiveDraft: (updates: Partial<POSDraftOrder>) => void;
+  addNewDraft: () => string;
+  switchToDraft: (id: string) => void;
+  clearCurrentDraft: () => void;
+  deleteCurrentDraft: () => void;
+  completeActiveDraft: () => void;
   shifts: Shift[];
   activeShift: Shift | null;
   startShift: (startingCash?: number, notes?: string) => Promise<Shift>;
@@ -160,6 +170,26 @@ export const sanitizeForFirestore = <T = any>(obj: T): T => {
   return obj;
 };
 
+export const createDefaultDraftOrder = (orderNumber: number = 1): POSDraftOrder => {
+  const d = new Date();
+  d.setDate(d.getDate() + 15);
+  return {
+    id: 'draft_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    orderNumber,
+    cartItems: [],
+    saleType: 'direct',
+    globalPriceType: 'retail',
+    selectedCustomerId: '',
+    customCustomerName: '',
+    customerPhone: '',
+    discount: 0,
+    paidAmount: 0,
+    dueDate: d.toISOString().split('T')[0],
+    notes: '',
+    updatedAt: new Date().toISOString(),
+  };
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
@@ -237,6 +267,137 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return defaultEmptySettings;
     }
   });
+
+  // POS Draft Orders Management (قوائم معلقة ومتعددة لا تختفي عند التنقل)
+  const [draftOrders, setDraftOrders] = useState<POSDraftOrder[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_pos_draft_orders');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return [createDefaultDraftOrder(1)];
+  });
+
+  const [activeDraftId, setActiveDraftId] = useState<string>(() => {
+    try {
+      const cachedId = localStorage.getItem('cached_pos_active_draft_id');
+      if (cachedId) return cachedId;
+    } catch {}
+    return '';
+  });
+
+  // Ensure activeDraft always points to a valid draft order
+  const activeDraft = useMemo(() => {
+    if (activeDraftId) {
+      const found = draftOrders.find(d => d.id === activeDraftId);
+      if (found) return found;
+    }
+    return draftOrders[0] || createDefaultDraftOrder(1);
+  }, [draftOrders, activeDraftId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cached_pos_draft_orders', JSON.stringify(draftOrders));
+    } catch (e) {}
+  }, [draftOrders]);
+
+  useEffect(() => {
+    try {
+      const idToStore = activeDraft.id;
+      if (idToStore) {
+        localStorage.setItem('cached_pos_active_draft_id', idToStore);
+      }
+    } catch (e) {}
+  }, [activeDraft.id]);
+
+  const updateActiveDraft = (updates: Partial<POSDraftOrder>) => {
+    setDraftOrders(prev => {
+      const targetId = activeDraft.id;
+      return prev.map(order => {
+        if (order.id === targetId) {
+          return {
+            ...order,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return order;
+      });
+    });
+  };
+
+  const addNewDraft = (): string => {
+    const usedNumbers = new Set(draftOrders.map(d => d.orderNumber));
+    let nextNum = 1;
+    while (usedNumbers.has(nextNum)) {
+      nextNum++;
+    }
+    const newOrder = createDefaultDraftOrder(nextNum);
+    setDraftOrders(prev => [...prev, newOrder]);
+    setActiveDraftId(newOrder.id);
+    return newOrder.id;
+  };
+
+  const switchToDraft = (id: string) => {
+    setActiveDraftId(id);
+  };
+
+  const clearCurrentDraft = () => {
+    setDraftOrders(prev => {
+      const targetId = activeDraft.id;
+      return prev.map(order => {
+        if (order.id === targetId) {
+          const d = new Date();
+          d.setDate(d.getDate() + 15);
+          return {
+            ...order,
+            cartItems: [],
+            selectedCustomerId: '',
+            customCustomerName: '',
+            customerPhone: '',
+            discount: 0,
+            paidAmount: 0,
+            dueDate: d.toISOString().split('T')[0],
+            notes: '',
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return order;
+      });
+    });
+  };
+
+  const deleteCurrentDraft = () => {
+    setDraftOrders(prev => {
+      const targetId = activeDraft.id;
+      if (prev.length <= 1) {
+        const fresh = createDefaultDraftOrder(1);
+        setActiveDraftId(fresh.id);
+        return [fresh];
+      }
+      const remaining = prev.filter(order => order.id !== targetId);
+      setActiveDraftId(remaining[0].id);
+      return remaining;
+    });
+  };
+
+  const completeActiveDraft = () => {
+    setDraftOrders(prev => {
+      const targetId = activeDraft.id;
+      if (prev.length <= 1) {
+        const fresh = createDefaultDraftOrder(1);
+        setActiveDraftId(fresh.id);
+        return [fresh];
+      }
+      const remaining = prev.filter(order => order.id !== targetId);
+      setActiveDraftId(remaining[0].id);
+      return remaining;
+    });
+  };
 
   const [sessionRole, setSessionRole] = useState<SessionRole>(() => {
     try {
@@ -1547,6 +1708,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         products, customers, invoices, payments, settings,
+        draftOrders, activeDraftId, activeDraft, updateActiveDraft, addNewDraft, switchToDraft, clearCurrentDraft, deleteCurrentDraft, completeActiveDraft,
         shifts, activeShift, startShift, endShift, getShiftStats, deleteShift,
         isStartShiftModalOpen, setIsStartShiftModalOpen,
         isEndShiftModalOpen, setIsEndShiftModalOpen,

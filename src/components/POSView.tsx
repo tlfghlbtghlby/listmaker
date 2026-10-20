@@ -81,20 +81,53 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
     addCustomer, 
     updateProduct,
     sessionRole,
-    hasPermission
+    hasPermission,
+    draftOrders,
+    activeDraftId,
+    activeDraft,
+    updateActiveDraft,
+    addNewDraft,
+    switchToDraft,
+    clearCurrentDraft,
+    deleteCurrentDraft,
+    completeActiveDraft
   } = useApp();
 
-  const [saleType, setSaleType] = useState<SaleType>('direct');
-  const [globalPriceType, setGlobalPriceType] = useState<PriceType>('retail');
+  // Active Draft Properties (محفوظة دائماً ولا تختفي عند التنقل بين أقسام التطبيق)
+  const cartItems = activeDraft.cartItems || [];
+  const saleType = activeDraft.saleType || 'direct';
+  const globalPriceType = activeDraft.globalPriceType || 'retail';
+  const selectedCustomerId = activeDraft.selectedCustomerId || '';
+  const customCustomerName = activeDraft.customCustomerName || '';
+  const customerPhone = activeDraft.customerPhone || '';
+  const discount = activeDraft.discount || 0;
+  const paidAmount = activeDraft.paidAmount || 0;
+  const dueDate = activeDraft.dueDate || '';
+  const notes = activeDraft.notes || '';
+
+  // Setters linked directly to persistent draft in AppContext & localStorage
+  const setCartItems = (action: InvoiceItem[] | ((prev: InvoiceItem[]) => InvoiceItem[])) => {
+    if (typeof action === 'function') {
+      updateActiveDraft({ cartItems: action(activeDraft.cartItems || []) });
+    } else {
+      updateActiveDraft({ cartItems: action });
+    }
+  };
+
+  const setSaleType = (val: SaleType) => updateActiveDraft({ saleType: val });
+  const setGlobalPriceType = (val: PriceType) => updateActiveDraft({ globalPriceType: val });
+  const setSelectedCustomerId = (val: string) => updateActiveDraft({ selectedCustomerId: val });
+  const setCustomCustomerName = (val: string) => updateActiveDraft({ customCustomerName: val });
+  const setCustomerPhone = (val: string) => updateActiveDraft({ customerPhone: val });
+  const setDiscount = (val: number) => updateActiveDraft({ discount: val });
+  const setPaidAmount = (val: number) => updateActiveDraft({ paidAmount: val });
+  const setDueDate = (val: string) => updateActiveDraft({ dueDate: val });
+  const setNotes = (val: string) => updateActiveDraft({ notes: val });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [mobileTab, setMobileTab] = useState<'products' | 'cart'>('products');
-  
-  const [cartItems, setCartItems] = useState<InvoiceItem[]>([]);
-  
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
-  const [customCustomerName, setCustomCustomerName] = useState<string>('');
-  const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickCustomerName, setQuickCustomerName] = useState('');
@@ -116,15 +149,6 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [cartErrorNotice, setCartErrorNotice] = useState<string | null>(null);
   const [unfoundBarcodePrompt, setUnfoundBarcodePrompt] = useState<string | null>(null);
-
-  const [discount, setDiscount] = useState<number>(0);
-  const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [dueDate, setDueDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    return d.toISOString().split('T')[0];
-  });
-  const [notes, setNotes] = useState<string>('');
 
   const handleOpenPriceEdit = (prod: Product) => {
     setProductForPriceEdit(prod);
@@ -508,10 +532,14 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
   };
 
   const clearCart = () => {
-    setCartItems([]);
-    setDiscount(0);
-    setPaidAmount(0);
-    setNotes('');
+    clearCurrentDraft();
+  };
+
+  const handleAddNewDraft = () => {
+    addNewDraft();
+    if (isMobileMode) {
+      setMobileTab('products');
+    }
   };
 
   const subtotal = useMemo(() => {
@@ -588,13 +616,7 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
       notes: notes.trim(),
     });
 
-    clearCart();
-    if (saleType === 'credit') {
-      setSelectedCustomerId('');
-      setCustomCustomerName('');
-      setCustomerPhone('');
-    }
-
+    completeActiveDraft();
     onInvoiceCreated(created, andPrint);
   };
 
@@ -938,31 +960,80 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
             
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
               <div className="p-4 border-b border-slate-200 bg-slate-50/60 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">نوع القائمة:</span>
-                  <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-slate-700">نوع القائمة:</span>
+                    <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setSaleType('direct')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition cursor-pointer ${
+                          saleType === 'direct'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-700 hover:text-slate-900'
+                        }`}
+                      >
+                        <DollarSign className="w-3.5 h-3.5" />
+                        <span>بيع مباشر (نقدي)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSaleType('credit')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition cursor-pointer ${
+                          saleType === 'credit'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-700 hover:text-slate-900'
+                        }`}
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>بيع آجل (دين)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Multi-Draft & Suspended Orders Bar */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* زر سلة المهملات لحذف وتفريغ القائمة الحالية */}
                     <button
-                      onClick={() => setSaleType('direct')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                        saleType === 'direct'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-700 hover:text-slate-900'
-                      }`}
+                      type="button"
+                      onClick={() => setShowClearConfirmModal(true)}
+                      className="w-8 h-8 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 hover:border-rose-600 flex items-center justify-center transition shadow-2xs cursor-pointer"
+                      title={`حذف وتفريغ القائمة الحالية (رقم ${activeDraft.orderNumber})`}
                     >
-                      <DollarSign className="w-3.5 h-3.5" />
-                      <span>بيع مباشر (نقدي)</span>
+                      <Trash2 className="w-4 h-4" />
                     </button>
+
+                    {/* زر (+) لتعليق القائمة وبدء قائمة جديدة */}
                     <button
-                      onClick={() => setSaleType('credit')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                        saleType === 'credit'
-                          ? 'bg-amber-600 text-white shadow-xs'
-                          : 'text-slate-700 hover:text-slate-900'
-                      }`}
+                      type="button"
+                      onClick={handleAddNewDraft}
+                      className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center transition shadow-2xs cursor-pointer"
+                      title="تعليق القائمة الحالية وبدء قائمة جديدة (+)"
                     >
-                      <CreditCard className="w-3.5 h-3.5" />
-                      <span>بيع آجل (دين)</span>
+                      <Plus className="w-4 h-4 stroke-[2.5]" />
                     </button>
+
+                    {/* مربعات خضراء بأرقام القوائم [1]، [2]، [3] فقط */}
+                    <div className="flex items-center gap-1">
+                      {draftOrders.map((order) => {
+                        const isActive = order.id === activeDraft.id;
+                        return (
+                          <button
+                            key={order.id}
+                            type="button"
+                            onClick={() => switchToDraft(order.id)}
+                            className={`w-8 h-8 rounded-lg font-mono font-black text-xs flex items-center justify-center transition cursor-pointer shadow-2xs ${
+                              isActive
+                                ? 'bg-emerald-600 text-white ring-2 ring-emerald-500/40 ring-offset-1'
+                                : 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400'
+                            }`}
+                            title={`الانتقال إلى القائمة ${order.orderNumber}`}
+                          >
+                            {order.orderNumber}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
@@ -1925,6 +1996,55 @@ export const POSView: React.FC<POSViewProps> = ({ onInvoiceCreated, onOpenNewPro
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Clearing / Deleting Current Draft Order */}
+      {showClearConfirmModal && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          dir="rtl"
+        >
+          <div className="bg-white rounded-2xl border border-rose-200 shadow-2xl max-w-sm w-full p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-slate-900">
+                  تأكيد مسح وتفريغ القائمة رقم {activeDraft.orderNumber}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  حذف المواد المدخلة وإلغاء هذه القائمة
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 bg-rose-50 border border-rose-100 rounded-xl p-3 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف وتفريغ القائمة الحالية؟ سيتم مسح المواد المدخلة ({cartItems.length} مواد) نهائياً من هذه المسودة.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirmModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                إلغاء التراجع
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteCurrentDraft();
+                  setShowClearConfirmModal(false);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>نعم، حذف وتفريغ القائمة</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

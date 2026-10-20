@@ -94,6 +94,23 @@ export interface Invoice {
   isPartiallyReturned?: boolean; // وسم يوضح إذا كانت القائمة مسترجعة جزئياً
 }
 
+// مسودة قائمة نشطة أو معلقة في نقطة البيع
+export interface POSDraftOrder {
+  id: string;
+  orderNumber: number; // رقم القائمة التسلسلي المعروض في المربع الأخضر [1]، [2]...
+  cartItems: InvoiceItem[];
+  saleType: SaleType;
+  globalPriceType: PriceType;
+  selectedCustomerId: string;
+  customCustomerName: string;
+  customerPhone: string;
+  discount: number;
+  paidAmount: number;
+  dueDate: string;
+  notes: string;
+  updatedAt: string;
+}
+
 export interface ShiftItemSold {
   productId: string;
   productName: string;
