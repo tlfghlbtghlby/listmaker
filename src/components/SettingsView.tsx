@@ -1,4 +1,4 @@
-import React, { useState, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   ADMIN_EMAIL,
@@ -90,6 +90,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   const [directPrintEnabled, setDirectPrintEnabled] = useState<boolean>(
     settings.directPrintEnabled ?? false
   );
+  const [selectedPrinterName, setSelectedPrinterName] = useState<string>(
+    (settings as any).selectedPrinterName || ''
+  );
+  const [availablePrinters, setAvailablePrinters] = useState<any[]>([]);
+  const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
+
+  // جلب قائمة الطابعات المتاحة في نظام التشغيل عند فتح شاشة الإعدادات
+  useEffect(() => {
+    const fetchPrinters = async () => {
+      const electronBridge = (window as any).electronAPI || (window as any).electron;
+      if (electronBridge && typeof electronBridge.getPrinters === 'function') {
+        setIsLoadingPrinters(true);
+        try {
+          const list = await electronBridge.getPrinters();
+          if (Array.isArray(list)) {
+            setAvailablePrinters(list);
+          }
+        } catch (e) {
+          console.warn('تعذر جلب الطابعات من النظام:', e);
+        } finally {
+          setIsLoadingPrinters(false);
+        }
+      }
+    };
+    fetchPrinters();
+  }, []);
 
   const [enableWholesale, setEnableWholesale] = useState<boolean>(settings.enableWholesale ?? true);
   const [desktopLayout, setDesktopLayout] = useState<'full' | 'partial'>(settings.desktopLayout || 'full');
@@ -165,6 +191,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       invoiceFooterNote: invoiceFooterNote.trim(),
       printFormat,
       directPrintEnabled,
+      selectedPrinterName: selectedPrinterName.trim(),
       enableWholesale,
       desktopLayout,
       headerRightSealText: headerRightSealText.trim() || (enableWholesale ? 'جملة' : 'تجزئة'),
@@ -175,7 +202,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       defaultSessionOnLaunch,
       employeePermissions,
       supervisorPermissions,
-    });
+    } as any);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
@@ -626,8 +653,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
             </div>
           </div>
 
-          {/* POS Printing Configuration (Fast Direct Print) */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+          {/* POS Printing Configuration (Fast Direct Print & Printer Selection) */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
@@ -638,7 +665,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                     الطباعة الفورية الصامتة للكاشير (Direct POS Printing)
                   </label>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    إرسال أمر الطباعة مباشرة للطابعة الافتراضية وتجاوز نافذة الحوار عند حفظ الفاتورة
+                    إرسال أمر الطباعة مباشرة لطابعة الكاشير وتجاوز نافذة الحوار عند حفظ الفاتورة
                   </p>
                 </div>
               </div>
@@ -652,6 +679,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                 />
                 <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
               </label>
+            </div>
+
+            {/* تحديد طابعة الويندوز المباشرة بالاسم للطباعة اللحظية */}
+            <div className="pt-3 border-t border-slate-200/80">
+              <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center justify-between">
+                <span>تحديد طابعة الفواتير المباشرة (لتسريع خروج الوصل في أقل من ثانية):</span>
+                {isLoadingPrinters && (
+                  <span className="text-[10px] text-emerald-700 flex items-center gap-1 font-normal">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    جاري فحص الطابعات...
+                  </span>
+                )}
+              </label>
+              <select
+                value={selectedPrinterName}
+                onChange={(e) => setSelectedPrinterName(e.target.value)}
+                className="w-full text-xs bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">-- استخدام الطابعة الافتراضية للنظام (Default Printer) --</option>
+                {availablePrinters.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.displayName || p.name} {p.isDefault ? '(الافتراضية الحالية)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                اختيار طابعتك الحرارية بالاسم (مثل طابعات Xprinter XP-80) يوجّه الفاتورة مباشرة لرأس الطباعة في جزء من الثانية دون أي تأخير أو استعلامات بطيئة من الويندوز.
+              </p>
             </div>
           </div>
 
