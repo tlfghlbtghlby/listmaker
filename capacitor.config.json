@@ -1,0 +1,6 @@
+{
+  "appId": "com.listmanger.app",
+  "appName": "List Maker",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
