@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Product } from '../types';
-import { X, Package, TrendingUp, AlertCircle, Box, Scan, Sparkles } from 'lucide-react';
+import { X, Package, TrendingUp, AlertCircle, Box, Scan, Sparkles, Scale } from 'lucide-react';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface ProductModalProps {
@@ -25,9 +25,12 @@ const COMMON_CATEGORIES = [
 
 const COMMON_UNITS = [
   'قطعة',
+  'كغم',
+  'كيلو',
+  'غرام',
+  'غم',
   'كرتونة',
   'كيس',
-  'كيلو',
   'لتر',
   'متر',
   'صندوق',
@@ -50,15 +53,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [code, setCode] = useState('');
   const [category, setCategory] = useState(COMMON_CATEGORIES[0]);
   const [unit, setUnit] = useState(COMMON_UNITS[0]);
+  const [isWeighted, setIsWeighted] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Carton capacity
   const [piecesPerCarton, setPiecesPerCarton] = useState<number>(12);
 
-  // Price Mode: 'carton' | 'piece'
+  // Price Mode: 'carton' | 'piece' (or 'kg' | 'gram' when weighted)
   const [priceInputMode, setPriceInputMode] = useState<'carton' | 'piece'>('carton');
 
-  // Prices: Carton level & Piece level
+  // Prices: Carton level & Piece level (or 1000g kg level & 1g gram level when weighted)
   const [cartonCost, setCartonCost] = useState<number | ''>('');
   const [pieceCost, setPieceCost] = useState<number | ''>('');
 
@@ -68,9 +72,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [cartonWholesale, setCartonWholesale] = useState<number | ''>('');
   const [pieceWholesale, setPieceWholesale] = useState<number | ''>('');
 
-  // Stock: Cartons count & total pieces count
+  // Stock: Cartons count & total pieces count (or kg stock & optional item count when weighted)
   const [cartonsStock, setCartonsStock] = useState<number | ''>(5);
   const [totalPiecesStock, setTotalPiecesStock] = useState<number | ''>(60);
+  const [itemCountStock, setItemCountStock] = useState<number | ''>('');
 
   const [minStock, setMinStock] = useState<number | ''>(6);
   const [notes, setNotes] = useState('');
@@ -83,21 +88,51 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setCode(productToEdit.code);
       setCategory(productToEdit.category || COMMON_CATEGORIES[0]);
       setUnit(productToEdit.unit || COMMON_UNITS[0]);
+      const weighted = Boolean(
+        productToEdit.isWeighted ||
+        productToEdit.unit === 'كغم' ||
+        productToEdit.unit === 'كيلو' ||
+        productToEdit.unit === 'غرام' ||
+        productToEdit.unit === 'غم'
+      );
+      setIsWeighted(weighted);
       
       const ppc = productToEdit.piecesPerCarton || 12;
       setPiecesPerCarton(ppc);
 
-      setPieceCost(productToEdit.costPrice);
-      setCartonCost(productToEdit.costPrice * ppc);
+      if (weighted) {
+        // For weighted items, base stored prices are per kilogram (1000g)
+        const kgCost = productToEdit.costPrice;
+        const kgRetail = productToEdit.retailPrice;
+        const kgWholesale = productToEdit.wholesalePrice;
 
-      setPieceRetail(productToEdit.retailPrice);
-      setCartonRetail(productToEdit.retailPrice * ppc);
+        setCartonCost(kgCost);
+        setPieceCost(Math.round((kgCost / 1000) * 1000) / 1000);
 
-      setPieceWholesale(productToEdit.wholesalePrice);
-      setCartonWholesale(productToEdit.wholesalePrice * ppc);
+        setCartonRetail(kgRetail);
+        setPieceRetail(Math.round((kgRetail / 1000) * 1000) / 1000);
 
-      setTotalPiecesStock(productToEdit.stock);
-      setCartonsStock(Math.round((productToEdit.stock / ppc) * 10) / 10);
+        setCartonWholesale(kgWholesale);
+        setPieceWholesale(Math.round((kgWholesale / 1000) * 1000) / 1000);
+
+        // Stock in kg
+        setCartonsStock(productToEdit.stock);
+        setTotalPiecesStock(productToEdit.stock);
+        setItemCountStock(typeof productToEdit.itemCount === 'number' ? productToEdit.itemCount : '');
+      } else {
+        setPieceCost(productToEdit.costPrice);
+        setCartonCost(productToEdit.costPrice * ppc);
+
+        setPieceRetail(productToEdit.retailPrice);
+        setCartonRetail(productToEdit.retailPrice * ppc);
+
+        setPieceWholesale(productToEdit.wholesalePrice);
+        setCartonWholesale(productToEdit.wholesalePrice * ppc);
+
+        setTotalPiecesStock(productToEdit.stock);
+        setCartonsStock(Math.round((productToEdit.stock / ppc) * 10) / 10);
+        setItemCountStock('');
+      }
 
       setMinStock(productToEdit.minStock || 6);
       setNotes(productToEdit.notes || '');
@@ -107,6 +142,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setCode(nextCode);
       setCategory(COMMON_CATEGORIES[0]);
       setUnit(COMMON_UNITS[0]);
+      setIsWeighted(false);
 
       const ppc = 12;
       setPiecesPerCarton(ppc);
@@ -122,6 +158,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
       setCartonsStock(5);
       setTotalPiecesStock(60);
+      setItemCountStock('');
 
       setMinStock(6);
       setNotes('');
@@ -168,7 +205,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
   };
 
-  // 1. Cost Price Handlers
+  // 1. Cost Price Handlers (Carton / Piece OR Kg / Gram when weighted)
   const handleCartonCostChange = (valStr: string) => {
     if (valStr === '') {
       setCartonCost('');
@@ -177,17 +214,26 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
     const val = parseFloat(valStr) || 0;
     setCartonCost(val);
-    setPieceCost(Math.round((val / piecesPerCarton) * 100) / 100);
+    if (isWeighted) {
+      // 1 kg = 1000g -> gram cost = kg cost / 1000
+      setPieceCost(Math.round((val / 1000) * 1000) / 1000);
+    } else {
+      setPieceCost(Math.round((val / piecesPerCarton) * 100) / 100);
+    }
   };
 
   const handlePieceCostChange = (valStr: string) => {
     if (valStr === '') {
       setPieceCost('');
+      if (isWeighted) setCartonCost('');
       return;
     }
     const val = parseFloat(valStr) || 0;
     setPieceCost(val);
-    // User can customize piece cost freely without changing carton cost
+    if (isWeighted) {
+      // 1g cost * 1000 = kg cost
+      setCartonCost(Math.round(val * 1000));
+    }
   };
 
   // 2. Retail Price Handlers
@@ -199,16 +245,26 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
     const val = parseFloat(valStr) || 0;
     setCartonRetail(val);
-    setPieceRetail(Math.round((val / piecesPerCarton) * 100) / 100);
+    if (isWeighted) {
+      // 1 kg = 1000g -> gram retail = kg retail / 1000
+      setPieceRetail(Math.round((val / 1000) * 1000) / 1000);
+    } else {
+      setPieceRetail(Math.round((val / piecesPerCarton) * 100) / 100);
+    }
   };
 
   const handlePieceRetailChange = (valStr: string) => {
     if (valStr === '') {
       setPieceRetail('');
+      if (isWeighted) setCartonRetail('');
       return;
     }
     const val = parseFloat(valStr) || 0;
     setPieceRetail(val);
+    if (isWeighted) {
+      // 1g retail * 1000 = kg retail
+      setCartonRetail(Math.round(val * 1000));
+    }
   };
 
   // 3. Wholesale Price Handlers
@@ -220,28 +276,42 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
     const val = parseFloat(valStr) || 0;
     setCartonWholesale(val);
-    setPieceWholesale(Math.round((val / piecesPerCarton) * 100) / 100);
+    if (isWeighted) {
+      // 1 kg = 1000g -> gram wholesale = kg wholesale / 1000
+      setPieceWholesale(Math.round((val / 1000) * 1000) / 1000);
+    } else {
+      setPieceWholesale(Math.round((val / piecesPerCarton) * 100) / 100);
+    }
   };
 
   const handlePieceWholesaleChange = (valStr: string) => {
     if (valStr === '') {
       setPieceWholesale('');
+      if (isWeighted) setCartonWholesale('');
       return;
     }
     const val = parseFloat(valStr) || 0;
     setPieceWholesale(val);
+    if (isWeighted) {
+      // 1g wholesale * 1000 = kg wholesale
+      setCartonWholesale(Math.round(val * 1000));
+    }
   };
 
   // 4. Stock Handlers
   const handleCartonsStockChange = (valStr: string) => {
     if (valStr === '') {
       setCartonsStock('');
-      setTotalPiecesStock('');
+      if (!isWeighted) setTotalPiecesStock('');
       return;
     }
     const cVal = parseFloat(valStr) || 0;
     setCartonsStock(cVal);
-    setTotalPiecesStock(Math.round(cVal * piecesPerCarton));
+    if (isWeighted) {
+      setTotalPiecesStock(cVal);
+    } else {
+      setTotalPiecesStock(Math.round(cVal * piecesPerCarton));
+    }
   };
 
   const handleTotalPiecesStockChange = (valStr: string) => {
@@ -260,18 +330,41 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const newErrors: { [key: string]: string } = {};
 
     if (!name.trim()) newErrors.name = 'اسم المادة مطلوب';
-    if (pieceCost === '' || Number(pieceCost) < 0) newErrors.costPrice = 'سعر الشراء / التكلفة مطلوب';
-    if (pieceRetail === '' || Number(pieceRetail) < 0) newErrors.retailPrice = 'سعر بيع المفرد مطلوب';
+
+    const effectiveCost = isWeighted 
+      ? (typeof cartonCost === 'number' ? cartonCost : (typeof pieceCost === 'number' ? pieceCost * 1000 : ''))
+      : pieceCost;
+    const effectiveRetail = isWeighted
+      ? (typeof cartonRetail === 'number' ? cartonRetail : (typeof pieceRetail === 'number' ? pieceRetail * 1000 : ''))
+      : pieceRetail;
+
+    if (effectiveCost === '' || Number(effectiveCost) < 0) newErrors.costPrice = 'سعر الشراء / التكلفة مطلوب';
+    if (effectiveRetail === '' || Number(effectiveRetail) < 0) newErrors.retailPrice = 'سعر بيع المفرد مطلوب';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    const finalPieceCost = Number(pieceCost);
-    const finalPieceRetail = Number(pieceRetail);
-    const finalPieceWholesale = pieceWholesale === '' ? finalPieceRetail : Number(pieceWholesale);
-    const finalStock = totalPiecesStock === '' ? 0 : Number(totalPiecesStock);
+    const finalPieceCost = Number(effectiveCost);
+    const finalPieceRetail = Number(effectiveRetail);
+    
+    let finalPieceWholesale = finalPieceRetail;
+    if (isWeighted) {
+      if (typeof cartonWholesale === 'number' && cartonWholesale > 0) {
+        finalPieceWholesale = cartonWholesale;
+      } else if (typeof pieceWholesale === 'number' && pieceWholesale > 0) {
+        finalPieceWholesale = pieceWholesale * 1000;
+      }
+    } else {
+      finalPieceWholesale = pieceWholesale === '' ? finalPieceRetail : Number(pieceWholesale);
+    }
+
+    const finalStock = isWeighted
+      ? (cartonsStock === '' ? 0 : Number(cartonsStock))
+      : (totalPiecesStock === '' ? 0 : Number(totalPiecesStock));
+
+    const finalItemCount = isWeighted && typeof itemCountStock === 'number' ? itemCountStock : undefined;
 
     const payload = {
       name: name.trim(),
@@ -282,8 +375,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       retailPrice: finalPieceRetail,
       wholesalePrice: finalPieceWholesale,
       stock: finalStock,
-      piecesPerCarton: piecesPerCarton,
+      piecesPerCarton: isWeighted ? 1 : piecesPerCarton,
       minStock: minStock === '' ? 6 : Number(minStock),
+      isWeighted: isWeighted || unit === 'كغم' || unit === 'كيلو' || unit === 'غرام' || unit === 'غم',
+      itemCount: finalItemCount,
       notes: notes.trim(),
     };
 
@@ -453,7 +548,76 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             </div>
           </div>
 
-          {/* Section 1: Carton Capacity Box (Yellow/Amber box matching Image 2) */}
+          {/* ميزة البيع بالوزن (ميزان - سعر الكيلو 1000g) */}
+          <div className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 shadow-2xs ${
+            isWeighted 
+              ? 'bg-amber-100/80 border-amber-400 ring-2 ring-amber-300' 
+              : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold shrink-0 ${
+                isWeighted ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-600'
+              }`}>
+                <Scale className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-900 block">
+                  مادة تباع بالوزن (ميزان - سعر الكيلو الواحد 1000g)
+                </span>
+                <span className="text-[11px] text-slate-600 leading-tight block">
+                  عند تفعيل هذا الخيار، يكون السعر المحدد هو سعر الكيلو الواحد، ويتم تحديد الوزن المباع (مثلاً: 0.350 كغم) بسهولة في القائمة.
+                </span>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={isWeighted}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIsWeighted(checked);
+                  if (checked) {
+                    if (unit === 'قطعة') setUnit('كغم');
+                    setPriceInputMode('carton');
+                    // Sync kg and gram prices
+                    if (typeof cartonCost === 'number' && cartonCost > 0) {
+                      setPieceCost(Math.round((cartonCost / 1000) * 1000) / 1000);
+                    } else if (typeof pieceCost === 'number' && pieceCost > 0) {
+                      setCartonCost(Math.round(pieceCost * 1000));
+                    }
+
+                    if (typeof cartonRetail === 'number' && cartonRetail > 0) {
+                      setPieceRetail(Math.round((cartonRetail / 1000) * 1000) / 1000);
+                    } else if (typeof pieceRetail === 'number' && pieceRetail > 0) {
+                      setCartonRetail(Math.round(pieceRetail * 1000));
+                    }
+
+                    if (typeof cartonWholesale === 'number' && cartonWholesale > 0) {
+                      setPieceWholesale(Math.round((cartonWholesale / 1000) * 1000) / 1000);
+                    } else if (typeof pieceWholesale === 'number' && pieceWholesale > 0) {
+                      setCartonWholesale(Math.round(pieceWholesale * 1000));
+                    }
+                  } else {
+                    if (unit === 'كغم' || unit === 'غرام' || unit === 'غم') setUnit('قطعة');
+                    if (typeof cartonCost === 'number' && piecesPerCarton > 0) {
+                      setPieceCost(Math.round((cartonCost / piecesPerCarton) * 100) / 100);
+                    }
+                    if (typeof cartonRetail === 'number' && piecesPerCarton > 0) {
+                      setPieceRetail(Math.round((cartonRetail / piecesPerCarton) * 100) / 100);
+                    }
+                    if (typeof cartonWholesale === 'number' && piecesPerCarton > 0) {
+                      setPieceWholesale(Math.round((cartonWholesale / piecesPerCarton) * 100) / 100);
+                    }
+                  }
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+            </label>
+          </div>
+
+          {/* Section 1: Carton Capacity Box (Yellow/Amber box matching Image 2) - فقط للمواد العادية غير الموزونة */}
+          {!isWeighted ? (
           <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-3.5 space-y-2.5">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-extrabold text-amber-950 flex items-center gap-1.5">
@@ -497,6 +661,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               * يتم استخدام هذه السعة للتحويل الحسابي الفوري بين سعر الكرتون وسعر القطعة، وكذلك لخصم المخزون بدقة.
             </p>
           </div>
+          ) : null}
 
           {/* Section 2: Pricing Structure with Auto-Calculation (Matching Image 2) */}
           <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-3.5 space-y-3">
@@ -506,10 +671,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <div>
                 <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
                   <TrendingUp className="w-4 h-4 text-emerald-600" />
-                  <span>هيكل الأسعار (تحويل تلقائي بين سعر القطعة وسعر الكرتون)</span>
+                  <span>
+                    {isWeighted
+                      ? 'هيكل الأسعار (سعر الكيلو 1000g وسعر الغرام 1g)'
+                      : 'هيكل الأسعار (تحويل تلقائي بين سعر القطعة وسعر الكرتون)'}
+                  </span>
                 </span>
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  يُحسب سعر القطعة تلقائياً عند إدخال سعر الكرتون، ويمكنك تعديل سعر القطعة بحرية دون تغيير سعر الكرتون.
+                  {isWeighted
+                    ? 'يُحسب سعر الغرام تلقائياً عند إدخال سعر الكيلو، أو العكس (1 كغم = 1000 غرام).'
+                    : 'يُحسب سعر القطعة تلقائياً عند إدخال سعر الكرتون، ويمكنك تعديل سعر القطعة بحرية دون تغيير سعر الكرتون.'}
                 </p>
               </div>
 
@@ -523,8 +694,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
-                  <Box className="w-3.5 h-3.5" />
-                  <span>بالكرتون</span>
+                  {isWeighted ? <Scale className="w-3.5 h-3.5" /> : <Box className="w-3.5 h-3.5" />}
+                  <span>{isWeighted ? 'بالكيلو (1000g)' : 'بالكرتون'}</span>
                 </button>
                 <button
                   type="button"
@@ -535,12 +706,12 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       : 'text-slate-700 hover:text-slate-900'
                   }`}
                 >
-                  <span>بالقطعة</span>
+                  <span>{isWeighted ? 'بالغرام (1g)' : 'بالقطعة'}</span>
                 </button>
               </div>
             </div>
 
-            {/* Price Cards Grid: مربع بجانب مربع وليس مستطيلاً طويلاً تحته مستطيل آخر */}
+            {/* Price Cards Grid: 3 مربعات للأسعار */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               
               {/* Square 1: Cost Price (مربع سعر الشراء والتكلفة) */}
@@ -557,10 +728,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
 
                 <div className="space-y-2 flex-1 flex flex-col justify-center">
-                  {/* Carton Cost */}
+                  {/* Carton or 1000g Kg Cost */}
                   <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200">
                     <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate">
-                      سعر الكرتون الكامل:
+                      {isWeighted ? 'سعر الكيلو (1000g):' : 'سعر الكرتون الكامل:'}
                     </label>
                     <div className="relative">
                       <input
@@ -578,10 +749,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Piece Cost */}
+                  {/* Piece or 1g Gram Cost */}
                   <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200">
                     <label className="block text-[11px] font-bold text-emerald-950 mb-1 truncate">
-                      تكلفة القطعة ({piecesPerCarton} ق):
+                      {isWeighted ? 'سعر الغرام (1g):' : `تكلفة القطعة (${piecesPerCarton} ق):`}
                     </label>
                     <div className="relative">
                       <input
@@ -615,10 +786,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
 
                 <div className="space-y-2 flex-1 flex flex-col justify-center">
-                  {/* Carton Retail */}
+                  {/* Carton or 1000g Kg Retail */}
                   <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200">
                     <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate">
-                      سعر بيع الكرتون:
+                      {isWeighted ? 'سعر بيع الكيلو (1000g):' : 'سعر بيع الكرتون:'}
                     </label>
                     <div className="relative">
                       <input
@@ -636,10 +807,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Piece Retail */}
+                  {/* Piece or 1g Gram Retail */}
                   <div className="bg-blue-50/70 p-2 rounded-xl border border-blue-200">
                     <label className="block text-[11px] font-bold text-blue-950 mb-1 truncate">
-                      سعر بيع القطعة ({piecesPerCarton} ق):
+                      {isWeighted ? 'سعر بيع الغرام (1g):' : `سعر بيع القطعة (${piecesPerCarton} ق):`}
                     </label>
                     <div className="relative">
                       <input
@@ -672,10 +843,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </div>
 
                 <div className="space-y-2 flex-1 flex flex-col justify-center">
-                  {/* Carton Wholesale */}
+                  {/* Carton or 1000g Kg Wholesale */}
                   <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-200">
                     <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate">
-                      بيع كرتون (جملة):
+                      {isWeighted ? 'بيع كيلو جملة (1000g):' : 'بيع كرتون (جملة):'}
                     </label>
                     <div className="relative">
                       <input
@@ -693,10 +864,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Piece Wholesale */}
+                  {/* Piece or 1g Gram Wholesale */}
                   <div className="bg-purple-50/70 p-2 rounded-xl border border-purple-200">
                     <label className="block text-[11px] font-bold text-purple-950 mb-1 truncate">
-                      بيع قطعة (جملة {piecesPerCarton} ق):
+                      {isWeighted ? 'بيع غرام جملة (1g):' : `بيع قطعة (جملة ${piecesPerCarton} ق):`}
                     </label>
                     <div className="relative">
                       <input
@@ -718,8 +889,31 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
             </div>
 
-              {/* Profit & Margin Indicator */}
-              {typeof pieceCost === 'number' && typeof pieceRetail === 'number' && pieceCost > 0 && (
+            {/* Profit & Margin Indicator */}
+            {isWeighted ? (
+              typeof cartonCost === 'number' && typeof cartonRetail === 'number' && cartonCost > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs flex-wrap gap-2">
+                  <div className="flex items-center gap-1.5 text-emerald-950 font-bold">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    <span>مؤشر ربح الكيلو (1000g):</span>
+                    <span className="font-mono text-emerald-800 font-black">
+                      {(cartonRetail - cartonCost) >= 0 ? `+${(cartonRetail - cartonCost).toLocaleString()}` : (cartonRetail - cartonCost).toLocaleString()} {settings.currency || 'دينار'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-md font-mono font-black text-xs ${
+                      ((cartonRetail - cartonCost) / cartonCost) * 100 >= 20 ? 'bg-emerald-600 text-white' : 'bg-emerald-200 text-emerald-900'
+                    }`}>
+                      نسبة الربح: {Math.round(((cartonRetail - cartonCost) / cartonCost) * 100)}%
+                    </span>
+                    <span className="text-[11px] text-emerald-800 font-bold font-mono">
+                      (ربح الغرام الواحد: {Math.round(((cartonRetail - cartonCost) / 1000) * 100) / 100} {settings.currency || 'دينار'})
+                    </span>
+                  </div>
+                </div>
+              )
+            ) : (
+              typeof pieceCost === 'number' && typeof pieceRetail === 'number' && pieceCost > 0 && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs flex-wrap gap-2">
                   <div className="flex items-center gap-1.5 text-emerald-950 font-bold">
                     <TrendingUp className="w-4 h-4 text-emerald-600" />
@@ -739,7 +933,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     </span>
                   </div>
                 </div>
-              )}
+              )
+            )}
 
           </div>
 
@@ -748,55 +943,113 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
                 <Box className="w-4 h-4 text-emerald-700" />
-                <span>رصيد المخزن الأولي (تحويل متبادل بين الكراتين والقطع)</span>
+                <span>
+                  {isWeighted
+                    ? 'رصيد المخزن الأولي (الرصيد بالوزن والعدد)'
+                    : 'رصيد المخزن الأولي (تحويل متبادل بين الكراتين والقطع)'}
+                </span>
               </span>
               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/90 border border-emerald-300/80 px-2 py-0.5 rounded-lg">
-                ينقص الرصيد تلقائياً عند بيع الكراتين أو القطع
+                {isWeighted
+                  ? 'ينقص رصيد الوزن تلقائياً عند البيع بالكيلو أو الغرام'
+                  : 'ينقص الرصيد تلقائياً عند بيع الكراتين أو القطع'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              {/* Cartons Count */}
-              <div className="bg-white p-2 rounded-xl border border-emerald-200 flex flex-col justify-between">
-                <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate">
-                  الرصيد بالكراتين:
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={cartonsStock}
-                    onChange={(e) => handleCartonsStockChange(e.target.value)}
-                    placeholder="5"
-                    className="w-full pl-10 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white"
-                  />
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">
-                    كارتون
-                  </span>
+            {isWeighted ? (
+              /* رصيد المواد الموزونة: الرصيد بالكيلو + الرصيد بالعدد اختياري */
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                {/* الرصيد بالكيلو */}
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col justify-between">
+                  <label className="block text-[11px] font-bold text-slate-800 mb-1 truncate">
+                    الرصيد بالكيلو (كغم): <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={cartonsStock}
+                      onChange={(e) => handleCartonsStockChange(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full pl-10 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white"
+                    />
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-emerald-700 font-bold">
+                      كغم
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Total Pieces Count */}
-              <div className="bg-white p-2 rounded-xl border border-emerald-200 flex flex-col justify-between">
-                <label className="block text-[11px] font-bold text-emerald-950 mb-1 truncate">
-                  الرصيد بالقطع (تلقائي):
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="0"
-                    value={totalPiecesStock}
-                    onChange={(e) => handleTotalPiecesStockChange(e.target.value)}
-                    placeholder="60"
-                    className="w-full pl-10 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white text-emerald-950"
-                  />
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">
-                    قطعة
-                  </span>
+                {/* الرصيد بالعدد (اختياري) */}
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-slate-700 truncate">
+                      الرصيد بالعدد (قطع / أكياس):
+                    </label>
+                    <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1 rounded">
+                      اختياري
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      value={itemCountStock}
+                      onChange={(e) => setItemCountStock(e.target.value === '' ? '' : parseInt(e.target.value, 10) || 0)}
+                      placeholder="مثال: 50 كيس أو قطعة (اختياري)"
+                      className="w-full pl-12 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white text-slate-800"
+                    />
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
+                      عدد
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* رصيد المواد العادية بالكرتون والقطع */
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                {/* Cartons Count */}
+                <div className="bg-white p-2 rounded-xl border border-emerald-200 flex flex-col justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate">
+                    الرصيد بالكراتين:
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={cartonsStock}
+                      onChange={(e) => handleCartonsStockChange(e.target.value)}
+                      placeholder="5"
+                      className="w-full pl-10 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white"
+                    />
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">
+                      كارتون
+                    </span>
+                  </div>
+                </div>
+
+                {/* Total Pieces Count */}
+                <div className="bg-white p-2 rounded-xl border border-emerald-200 flex flex-col justify-between">
+                  <label className="block text-[11px] font-bold text-emerald-950 mb-1 truncate">
+                    الرصيد بالقطع (تلقائي):
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      value={totalPiecesStock}
+                      onChange={(e) => handleTotalPiecesStockChange(e.target.value)}
+                      placeholder="60"
+                      className="w-full pl-10 pr-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono bg-white text-emerald-950"
+                    />
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">
+                      قطعة
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

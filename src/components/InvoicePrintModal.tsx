@@ -601,11 +601,11 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                               {returnedQty > 0 ? (
                                 <span>{netQty} <span className="text-[9px] text-slate-500 font-normal">({item.quantity})</span></span>
                               ) : (
-                                item.quantity
+                                item.isWeighted ? `${item.quantity} كغم` : item.quantity
                               )}
                             </td>
                             <td className="py-1 px-2 border-l border-black text-center font-mono">{item.unitPrice.toLocaleString()}</td>
-                            <td className="py-1 px-2 text-center font-mono">{(netQty * item.unitPrice).toLocaleString()}</td>
+                            <td className="py-1 px-2 text-center font-mono">{Math.round(netQty * item.unitPrice).toLocaleString()}</td>
                           </tr>
                         );
                       })}
@@ -742,9 +742,9 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                             )}
                           </td>
                           <td className="py-0.5 text-center font-bold">
-                            {returnedQty > 0 ? `${netQty}` : item.quantity}
+                            {returnedQty > 0 ? `${netQty}` : (item.isWeighted ? `${item.quantity} كغم` : item.quantity)}
                           </td>
-                          <td className="py-0.5 text-left font-bold">{(netQty * item.unitPrice).toLocaleString()}</td>
+                          <td className="py-0.5 text-left font-bold">{Math.round(netQty * item.unitPrice).toLocaleString()}</td>
                         </tr>
                       );
                     })}

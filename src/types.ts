@@ -14,6 +14,8 @@ export interface Product {
   stock: number; // إجمالي القطع المتوفرة بالمخزن
   piecesPerCarton?: number; // كم يحتوي الكارتون الواحد من قطع (مثال: 6 قطع في الكارتون)
   minStock: number; // الحد الأدنى للتنبيه عند قرب النفاد
+  isWeighted?: boolean; // هل المادة تباع بالوزن (سعر الكيلو الواحد 1000g)
+  itemCount?: number; // الرصيد بالعدد (اختياري للمواد الموزونة كالقطع أو الأكياس)
   notes?: string;
   ownerUid?: string;
   createdAt: string;
@@ -43,8 +45,10 @@ export interface InvoiceItem {
   piecesPerCarton?: number; // سعة الكرتون
   deductedPieces?: number; // إجمالي القطع المخصومة من رصيد المخزن
   costPrice: number; // سعر الشراء لحساب الربح
-  unitPrice: number; // سعر البيع للوحدة
-  quantity: number; // الكمية الأصلية المباعة
+  unitPrice: number; // سعر البيع للوحدة (أو سعر الكيلو للمواد الموزونة)
+  quantity: number; // الكمية الأصلية المباعة (أو الوزن بالكيلوغرام مثلاً 0.350)
+  isWeighted?: boolean; // مادة مباعة بالوزن
+  weightGrams?: number; // الوزن المعادل بالغرام (مثلاً 350g)
   returnedQuantity?: number; // الكمية المسترجعة من هذا البند
   total: number; // المجموع للسطر
   isCustomPrice?: boolean; // تم تعديل السعر في هذه القائمة فقط

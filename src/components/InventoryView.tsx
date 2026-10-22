@@ -411,8 +411,58 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       {/* Stock with quick +/- */}
                       <td className="py-3 px-4">
                         {(() => {
+                          const isWeight = Boolean(prod.isWeighted || prod.unit === 'كغم' || prod.unit === 'كيلو' || prod.unit === 'غرام' || prod.unit === 'غم');
                           const ppc = prod.piecesPerCarton || 1;
                           const breakdown = getCartonBreakdown(prod.stock, ppc);
+
+                          if (isWeight) {
+                            return (
+                              <div className="flex flex-col items-center gap-1.5 min-w-[140px]">
+                                <span
+                                  className={`text-center font-bold text-xs px-2.5 py-1 rounded-md whitespace-nowrap shadow-2xs ${
+                                    isOut
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                      : isLow
+                                      ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  }`}
+                                  title={`الرصيد بالوزن: ${prod.stock} كغم`}
+                                >
+                                  {prod.stock} كغم {typeof prod.itemCount === 'number' && prod.itemCount > 0 ? `(${prod.itemCount} عدد/كيس)` : ''}
+                                </span>
+
+                                {/* Quick Adjustment Controls for Weight */}
+                                <div className="flex items-center gap-1 text-[11px] whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => adjustStock(prod.id, -1)}
+                                    className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition"
+                                    title="خصم 1 كغم"
+                                  >
+                                    -1 كغم
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => adjustStock(prod.id, 1)}
+                                    className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition"
+                                    title="إضافة 1 كغم"
+                                  >
+                                    +1 كغم
+                                  </button>
+                                  <span className="text-slate-300">|</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => adjustStock(prod.id, 5)}
+                                    className="px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 transition"
+                                    title="إضافة 5 كغم"
+                                  >
+                                    +5 كغم
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+
                           return (
                             <div className="flex flex-col items-center gap-1.5 min-w-[140px]">
                               <span

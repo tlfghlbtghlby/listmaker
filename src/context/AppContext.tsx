@@ -948,7 +948,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts(prev => {
       const t = prev.find(p => p.id === id);
       if (!t) return prev;
-      const newStock = Math.max(0, t.stock + delta);
+      const newStock = Math.max(0, Math.round((t.stock + delta) * 1000) / 1000);
       updateDoc(doc(db, 'items', id), sanitizeForFirestore({ stock: newStock })).catch(() => {});
       const updated = prev.map(p => p.id === id ? { ...p, stock: newStock } : p);
       try { localStorage.setItem('cached_pos_products', JSON.stringify(updated)); } catch (e) {}
