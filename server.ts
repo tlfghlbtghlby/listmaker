@@ -11,7 +11,7 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '50mb' }));
 
-// Enable CORS for universal access across any shared domain or iframe
+// تمكين CORS لضمان التواصل مع واجهة Electron دون أي عوائق
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -22,8 +22,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ensure data directory exists for persistent storage across devices
-const DATA_DIR = path.join(__dirname, 'data_storage');
+// المسار المتوافق بنسبة 100% مع صلاحيات ويندوز (%APPDATA%) لتفادي رفض الحفظ في Program Files
+const APPDATA_PATH = process.env.APPDATA || 
+  (process.platform === 'darwin' 
+    ? path.join(process.env.HOME || '', 'Library', 'Application Support') 
+    : path.join(process.env.HOME || '', '.config'));
+
+const DATA_DIR = path.join(APPDATA_PATH, 'ListMaker', 'data_storage');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -33,12 +38,12 @@ const getStoreFilePath = (userId: string) => {
   return path.join(DATA_DIR, `store_${safeId}.json`);
 };
 
-// Health check endpoint for network sensing
+// فحص صحة الخادم
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// GET /api/sync/:userId - Pull latest store data from cloud/server
+// قراءة بيانات المخزن محلياً
 app.get('/api/sync/:userId', (req, res) => {
   try {
     const { userId } = req.params;
@@ -49,7 +54,6 @@ app.get('/api/sync/:userId', (req, res) => {
       return res.json({ success: true, data });
     }
 
-    // Fallback for admin or uninitialized stores: seed from existing client store if available
     const files = fs.readdirSync(DATA_DIR).filter(f => f.startsWith('store_') && f.endsWith('.json'));
     for (const file of files) {
       try {
@@ -68,14 +72,14 @@ app.get('/api/sync/:userId', (req, res) => {
   }
 });
 
-// POST /api/sync/:userId - Push updated store data to cloud/server
+// حفظ ومزامنة بيانات المخزن على قرص الويندوز
 app.post('/api/sync/:userId', (req, res) => {
   try {
     const { userId } = req.params;
     const storeData = req.body;
     const filePath = getStoreFilePath(userId);
 
-    // Safeguard: Protect against race conditions that write empty arrays on logout/switching users
+    // حماية ضد التصفير العرضي للبيانات عند تسجيل الخروج أو أخطاء التزامن
     if (fs.existsSync(filePath) && !storeData.forceEmpty) {
       try {
         const existingRaw = fs.readFileSync(filePath, 'utf-8');
@@ -117,17 +121,14 @@ app.post('/api/sync/:userId', (req, res) => {
   }
 });
 
-// Admin Users Management Endpoints
 const USERS_FILE = path.join(DATA_DIR, 'registered_clients.json');
 
-// Normalize phone number (strip spaces, symbols, unicode formatting, Arabic digits)
 const normalizeDigits = (str: string) => {
   return (str || '')
     .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\s\-\(\)\+\.]/g, '')
     .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
 };
 
-// Smart Account Resolver: Matches input against username, email, phone, or displayName
 app.post('/api/auth/resolve', (req, res) => {
   try {
     const { identifier } = req.body;
@@ -137,7 +138,6 @@ app.post('/api/auth/resolve', (req, res) => {
 
     const cleanInput = identifier.trim();
 
-    // Check Admin identifier (Strictly tlfghlbtghlby@gmail.com only)
     if (cleanInput.toLowerCase() === 'tlfghlbtghlby@gmail.com' || cleanInput.toLowerCase() === 'tlfghlbtghlby') {
       return res.json({
         success: true,
@@ -161,15 +161,10 @@ app.post('/api/auth/resolve', (req, res) => {
       users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
     }
 
-    // Search for match across all identifiers
     const matched = users.find((u: any) => {
-      // 1. Direct username match (case-insensitive)
       if (u.username && u.username.toLowerCase() === cleanInput.toLowerCase()) return true;
-      // 2. Direct email match
       if (u.email && u.email.toLowerCase() === cleanInput.toLowerCase()) return true;
-      // 3. Phone match
       if (inputDigits && inputDigits.length >= 7 && normalizeDigits(u.phone) === inputDigits) return true;
-      // 4. DisplayName or StoreName match
       if (u.displayName && u.displayName.trim().toLowerCase() === cleanInput.toLowerCase()) return true;
       if (u.storeName && u.storeName.trim().toLowerCase() === cleanInput.toLowerCase()) return true;
       return false;
@@ -198,7 +193,6 @@ app.post('/api/auth/resolve', (req, res) => {
   }
 });
 
-// Dedicated secure login endpoint with direct validation & password check
 app.post('/api/auth/login', (req, res) => {
   try {
     const { identifier, password } = req.body;
@@ -212,7 +206,6 @@ app.post('/api/auth/login', (req, res) => {
     const cleanInput = identifier.trim();
     const cleanPass = password.trim();
 
-    // 1. Check Admin login (Secured exclusively in Cloud/Server backend)
     const isAdminIdentifier = 
       cleanInput.toLowerCase() === 'tlfghlbtghlby@gmail.com' ||
       cleanInput.toLowerCase() === 'tlfghlbtghlby' ||
@@ -253,7 +246,6 @@ app.post('/api/auth/login', (req, res) => {
       });
     }
 
-    // 2. Check registered client
     const inputDigits = normalizeDigits(cleanInput);
     let users: any[] = [];
     if (fs.existsSync(USERS_FILE)) {
@@ -273,7 +265,7 @@ app.post('/api/auth/login', (req, res) => {
     if (!matched) {
       return res.status(404).json({
         success: false,
-        error: 'اسم المستخدم أو رقم الهاتف غير مسجل في النظام. يرجى التأكد من البيانات أو مراجعة المدير.'
+        error: 'اسم المستخدم أو رقم الهاتف غير مسجل في النظام.'
       });
     }
 
@@ -287,7 +279,7 @@ app.post('/api/auth/login', (req, res) => {
     if (matched.password && String(matched.password).trim() !== cleanPass) {
       return res.status(401).json({
         success: false,
-        error: 'كلمة المرور غير صحيحة. يرجى التأكد من البيانات المدخلة.'
+        error: 'كلمة المرور غير صحيحة.'
       });
     }
 
@@ -310,7 +302,6 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// Change Password Endpoint (لتغيير كلمة المرور من الإعدادات للعملاء والمدير)
 app.post('/api/auth/change-password', (req, res) => {
   try {
     const { userId, oldPassword, newPassword } = req.body;
@@ -324,7 +315,6 @@ app.post('/api/auth/change-password', (req, res) => {
       return res.status(400).json({ success: false, error: 'يجب ألا تقل كلمة المرور الجديدة عن 6 خانات' });
     }
 
-    // 1. If Admin
     if (userId === 'admin_master_001' || userId === 'admin_root' || userId === 'admin') {
       const adminCredsPath = path.join(DATA_DIR, 'admin_credentials.json');
       let currentAdminPass = '123456';
@@ -343,7 +333,6 @@ app.post('/api/auth/change-password', (req, res) => {
       return res.json({ success: true, message: 'تم حفظ كلمة المرور الجديدة للمدير العام بنجاح' });
     }
 
-    // 2. If Client user
     if (fs.existsSync(USERS_FILE)) {
       let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
       const userIndex = users.findIndex((u: any) => u.uid === userId);
@@ -372,7 +361,6 @@ app.get('/api/admin/users', (req, res) => {
     if (fs.existsSync(USERS_FILE)) {
       const content = fs.readFileSync(USERS_FILE, 'utf-8');
       const allUsers = JSON.parse(content);
-      // Strictly exclude any admin accounts from client lists so it is never displayed or editable by others
       const clientsOnly = allUsers.filter((u: any) => 
         u.role !== 'admin' && 
         u.uid !== 'admin_master_001' && 
@@ -417,7 +405,6 @@ app.post('/api/admin/users/:userId/status', (req, res) => {
   }
 });
 
-// Update client account details (اسم، محل، هاتف، كلمة مرور)
 app.put('/api/admin/users/:userId', (req, res) => {
   try {
     const { userId } = req.params;
@@ -451,7 +438,6 @@ app.put('/api/admin/users/:userId', (req, res) => {
   }
 });
 
-// Delete client account
 app.delete('/api/admin/users/:userId', (req, res) => {
   try {
     const { userId } = req.params;
@@ -468,7 +454,6 @@ app.delete('/api/admin/users/:userId', (req, res) => {
       );
       fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
 
-      // Also clean up client store file if it exists
       const storePath = getStoreFilePath(userId);
       if (fs.existsSync(storePath)) {
         try {
@@ -484,7 +469,6 @@ app.delete('/api/admin/users/:userId', (req, res) => {
   }
 });
 
-// Setup Vite middleware in dev or serve static files in production
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production' || fs.existsSync(path.join(__dirname, 'dist'));
 
