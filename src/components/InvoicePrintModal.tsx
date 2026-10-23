@@ -13,11 +13,13 @@ import {
   RefreshCw, 
   Info, 
   ArrowDownAZ,
-  PackageMinus
+  PackageMinus,
+  Sparkles
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { PartialReturnModal } from './PartialReturnModal';
+import { ModernInvoiceHeader } from './ModernInvoiceHeader';
 
 interface InvoicePrintModalProps {
   invoice: Invoice | null;
@@ -36,6 +38,15 @@ const StarburstSeal: React.FC<{ text: string }> = ({ text }) => (
 
 export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, onClose }) => {
   const { settings, hasPermission } = useApp();
+  const [activeTemplate, setActiveTemplate] = useState<'classic' | 'modern'>(
+    settings.invoiceTemplate || 'modern'
+  );
+
+  useEffect(() => {
+    if (settings.invoiceTemplate) {
+      setActiveTemplate(settings.invoiceTemplate);
+    }
+  }, [settings.invoiceTemplate]);
   const [printLayout, setPrintLayout] = useState<'a4' | 'a5' | 'thermal80' | 'thermal58'>(
     settings.printFormat === 'thermal58'
       ? 'thermal58'
@@ -387,6 +398,38 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
               </div>
             </div>
 
+            {/* قالب الفاتورة: كلاسيكي أو عصري ملون */}
+            <div className="flex items-center gap-1.5 border-r border-slate-300 pr-2.5 sm:mr-1">
+              <span className="text-xs font-bold text-slate-700">شكل القائمة:</span>
+              <div className="flex items-center bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setActiveTemplate('classic')}
+                  className={`px-2 py-1 rounded-md transition cursor-pointer ${
+                    activeTemplate === 'classic'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="التصميم التقليدي الكلاسيكي ذو الأختام النجمية"
+                >
+                  كلاسيكي
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTemplate('modern')}
+                  className={`px-2 py-1 rounded-md transition cursor-pointer flex items-center gap-1 ${
+                    activeTemplate === 'modern'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="التصميم العصري الملون المطابق للنموذج التجاري"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>عصري ملون</span>
+                </button>
+              </div>
+            </div>
+
             <div className="flex items-center gap-1.5 border-r border-slate-300 pr-2.5 sm:mr-1">
               <label 
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition select-none shadow-2xs ${
@@ -517,31 +560,39 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             {/* A4 and A5 Full Sheet Invoice */}
             {!isThermal ? (
               <div className="space-y-2.5 text-black leading-tight">
-                {/* Header Box */}
-                <div className="border border-black rounded-md p-2.5 sm:p-3 relative flex flex-col items-center justify-center text-center">
-                  <div className="absolute right-2.5 top-2">
-                    <StarburstSeal 
-                      text={settings.headerRightSealText || (settings.enableWholesale ? "جملة" : "تجزئة")} 
-                    />
-                  </div>
-                  <div className="absolute left-2.5 top-2">
-                    <StarburstSeal 
-                      text={settings.headerLeftSealText || "مفرد"} 
-                    />
-                  </div>
-                  <h1 className="text-xl sm:text-2xl font-black text-black">
-                    {settings.storeName || 'المحل'}
-                  </h1>
-                  <div className="text-xs sm:text-sm font-bold text-black mt-1">
-                    {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName} · {settings.businessSubtitle || 'تجارة عامة'}
-                  </div>
-                  {(settings.address || settings.phone) && (
-                    <div className="text-[11px] font-semibold text-black mt-1 pt-1 border-t border-dotted border-black/40 w-full text-center">
-                      {settings.address && <span>{settings.address}&nbsp;&nbsp;&nbsp;&nbsp;</span>}
-                      {settings.phone && <span>هاتف: {settings.phone}</span>}
+                {/* Header Box: Modern vs Classic */}
+                {activeTemplate === 'modern' ? (
+                  <ModernInvoiceHeader
+                    settings={settings}
+                    invoiceNumber={invoice.invoiceNumber}
+                    isThermal={false}
+                  />
+                ) : (
+                  <div className="border border-black rounded-md p-2.5 sm:p-3 relative flex flex-col items-center justify-center text-center">
+                    <div className="absolute right-2.5 top-2">
+                      <StarburstSeal 
+                        text={settings.headerRightSealText || (settings.enableWholesale ? "جملة" : "تجزئة")} 
+                      />
                     </div>
-                  )}
-                </div>
+                    <div className="absolute left-2.5 top-2">
+                      <StarburstSeal 
+                        text={settings.headerLeftSealText || "مفرد"} 
+                      />
+                    </div>
+                    <h1 className="text-xl sm:text-2xl font-black text-black">
+                      {settings.storeName || 'المحل'}
+                    </h1>
+                    <div className="text-xs sm:text-sm font-bold text-black mt-1">
+                      {settings.managerLabel || 'بإدارة'}: {settings.ownerName || settings.storeName} · {settings.businessSubtitle || 'تجارة عامة'}
+                    </div>
+                    {(settings.address || settings.phone) && (
+                      <div className="text-[11px] font-semibold text-black mt-1 pt-1 border-t border-dotted border-black/40 w-full text-center">
+                        {settings.address && <span>{settings.address}&nbsp;&nbsp;&nbsp;&nbsp;</span>}
+                        {settings.phone && <span>هاتف: {settings.phone}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Metadata Bar */}
                 <div className="border border-black rounded-md px-3 py-1.5 flex items-center justify-between text-xs font-bold text-black flex-wrap gap-2">
@@ -696,13 +747,22 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
             ) : (
               /* Thermal Roll Format (58mm / 80mm) */
               <div className="space-y-2 text-black font-mono leading-tight">
-                <div className="text-center border-b border-black pb-2">
-                  <h1 className={`font-black ${is58mm ? 'text-sm' : 'text-base'}`}>
-                    {settings.storeName || 'المحل'}
-                  </h1>
-                  <p className="text-[10px] mt-0.5">{settings.businessSubtitle || 'وصل مبيعات'}</p>
-                  {settings.phone && <p className="text-[10px] mt-0.5">هاتف: {settings.phone}</p>}
-                </div>
+                {/* Header: Modern vs Classic for Thermal */}
+                {activeTemplate === 'modern' ? (
+                  <ModernInvoiceHeader
+                    settings={settings}
+                    invoiceNumber={invoice.invoiceNumber}
+                    isThermal={true}
+                  />
+                ) : (
+                  <div className="text-center border-b border-black pb-2">
+                    <h1 className={`font-black ${is58mm ? 'text-sm' : 'text-base'}`}>
+                      {settings.storeName || 'المحل'}
+                    </h1>
+                    <p className="text-[10px] mt-0.5">{settings.businessSubtitle || 'وصل مبيعات'}</p>
+                    {settings.phone && <p className="text-[10px] mt-0.5">هاتف: {settings.phone}</p>}
+                  </div>
+                )}
 
                 <div className="text-[10px] border-b border-dashed border-black pb-1.5 space-y-0.5">
                   <div className="flex justify-between">

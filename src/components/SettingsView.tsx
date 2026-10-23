@@ -5,7 +5,9 @@ import {
   SessionRole,
   RolePermissions,
   DEFAULT_EMPLOYEE_PERMISSIONS,
-  DEFAULT_SUPERVISOR_PERMISSIONS
+  DEFAULT_SUPERVISOR_PERMISSIONS,
+  InvoiceTemplateType,
+  ModernInvoiceHeaderConfig
 } from '../types';
 import { changeAccountPassword } from '../firebase';
 import { 
@@ -42,12 +44,20 @@ import {
   Plus,
   Edit2,
   X,
-  UserPlus
+  UserPlus,
+  Palette,
+  QrCode as QrCodeIcon,
+  Image as ImageIcon,
+  Share2,
+  Send,
+  Phone,
+  Instagram
 } from 'lucide-react';
 import { PresetShift, StoreSupervisor } from '../types';
 import { QuickAddItemsSection } from './QuickAddItemsSection';
 import { ExportBackupModal } from './ExportBackupModal';
 import { WipeProductsModal } from './WipeProductsModal';
+import { ModernInvoiceHeader } from './ModernInvoiceHeader';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
 const AdminPanel = React.lazy(() => import('./AdminPanel'));
@@ -208,13 +218,182 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   const [editPresetCode, setEditPresetCode] = useState('');
   const [editPresetNotes, setEditPresetNotes] = useState('');
 
+  // قالب وتصميم القائمة (عصري ملون كالصورة أم كلاسيكي)
+  const [invoiceTemplate, setInvoiceTemplate] = useState<InvoiceTemplateType>(
+    settings.invoiceTemplate || 'modern'
+  );
+  const [modernBadgeText, setModernBadgeText] = useState(
+    settings.modernHeader?.badgeText ?? 'قرطاسية'
+  );
+  const [modernFontFamily, setModernFontFamily] = useState(
+    settings.modernHeader?.fontFamily ?? 'Aref Ruqaa'
+  );
+  const [modernRightColor, setModernRightColor] = useState(
+    settings.modernHeader?.rightBannerColor ?? '#1e40af'
+  );
+  const [modernLeftColor, setModernLeftColor] = useState(
+    settings.modernHeader?.leftBannerColor ?? '#ea580c'
+  );
+  const [modernActivitiesText, setModernActivitiesText] = useState(
+    settings.modernHeader?.activitiesText ?? 'بيع كافة القرطاسية والمستلزمات المدرسية والمكتبية والهدايا ولعب الأطفال'
+  );
+  const [modernBadgeLeftText, setModernBadgeLeftText] = useState(
+    settings.modernHeader?.badgeLeftText ?? 'جملة'
+  );
+  const [modernBadgeRightText, setModernBadgeRightText] = useState(
+    settings.modernHeader?.badgeRightText ?? 'مفرد'
+  );
+  const [modernCenterIconType, setModernCenterIconType] = useState<'preset' | 'custom'>(
+    settings.modernHeader?.centerIconType ?? 'preset'
+  );
+  const [modernCenterIconPreset, setModernCenterIconPreset] = useState(
+    settings.modernHeader?.centerIconPreset ?? 'stationery'
+  );
+  const [modernCenterIconCustomUrl, setModernCenterIconCustomUrl] = useState(
+    settings.modernHeader?.centerIconCustomUrl ?? ''
+  );
+  const [modernBarcodeImageUrl, setModernBarcodeImageUrl] = useState(
+    settings.modernHeader?.barcodeImageUrl ?? ''
+  );
+  const [modernShowBarcode, setModernShowBarcode] = useState<boolean>(
+    settings.modernHeader?.showBarcode ?? true
+  );
+  const [modernShowTelegram, setModernShowTelegram] = useState<boolean>(
+    settings.modernHeader?.showTelegram ?? true
+  );
+  const [modernTelegramHandle, setModernTelegramHandle] = useState(
+    settings.modernHeader?.telegramHandle ?? ''
+  );
+  const [modernShowFacebook, setModernShowFacebook] = useState<boolean>(
+    settings.modernHeader?.showFacebook ?? true
+  );
+  const [modernFacebookName, setModernFacebookName] = useState(
+    settings.modernHeader?.facebookName ?? ''
+  );
+  const [modernShowWhatsapp, setModernShowWhatsapp] = useState<boolean>(
+    settings.modernHeader?.showWhatsapp ?? true
+  );
+  const [modernWhatsappNumber, setModernWhatsappNumber] = useState(
+    settings.modernHeader?.whatsappNumber ?? settings.phone ?? ''
+  );
+  const [modernShowInstagram, setModernShowInstagram] = useState<boolean>(
+    settings.modernHeader?.showInstagram ?? true
+  );
+  const [modernInstagramHandle, setModernInstagramHandle] = useState(
+    settings.modernHeader?.instagramHandle ?? ''
+  );
+  const [modernDeliveryNote, setModernDeliveryNote] = useState(
+    settings.modernHeader?.deliveryNote ?? 'تتوفر خدمة التوصيل إلى كافة المحافظات'
+  );
+
+  const barcodeFileInputRef = useRef<HTMLInputElement>(null);
+  const centerIconFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleBarcodeFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setModernBarcodeImageUrl(event.target.result);
+        setModernShowBarcode(true);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCenterIconFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setModernCenterIconCustomUrl(event.target.result);
+        setModernCenterIconType('custom');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const productsOnlyFileInputRef = useRef<HTMLInputElement>(null);
+
+  // مزامنة حالة الحقول عند تحميل أو تحديث الإعدادات من السحابة أو الكاش
+  useEffect(() => {
+    if (settings) {
+      setStoreName(settings.storeName || '');
+      setOwnerName(settings.ownerName || '');
+      setPhone(settings.phone || '');
+      setAddress(settings.address || '');
+      setCurrency(settings.currency || 'د.ع');
+      setInvoiceFooterNote(settings.invoiceFooterNote || '');
+      if (settings.printFormat) setPrintFormat(settings.printFormat);
+      if (settings.directPrintEnabled !== undefined) setDirectPrintEnabled(settings.directPrintEnabled);
+      if ((settings as any).selectedPrinterName !== undefined) setSelectedPrinterName((settings as any).selectedPrinterName);
+      if (settings.enableWholesale !== undefined) setEnableWholesale(settings.enableWholesale);
+      if (settings.desktopLayout) setDesktopLayout(settings.desktopLayout);
+      if (settings.headerRightSealText) setHeaderRightSealText(settings.headerRightSealText);
+      if (settings.headerLeftSealText) setHeaderLeftSealText(settings.headerLeftSealText);
+      if (settings.businessSubtitle) setBusinessSubtitle(settings.businessSubtitle);
+      if (settings.managerLabel) setManagerLabel(settings.managerLabel);
+      if (settings.supervisorPin) setSupervisorPin(settings.supervisorPin);
+      if (settings.defaultSessionOnLaunch) setDefaultSessionOnLaunch(settings.defaultSessionOnLaunch);
+      if (settings.invoiceTemplate) setInvoiceTemplate(settings.invoiceTemplate);
+      if (settings.modernHeader) {
+        const m = settings.modernHeader;
+        if (m.badgeText !== undefined) setModernBadgeText(m.badgeText);
+        if (m.fontFamily !== undefined) setModernFontFamily(m.fontFamily);
+        if (m.rightBannerColor !== undefined) setModernRightColor(m.rightBannerColor);
+        if (m.leftBannerColor !== undefined) setModernLeftColor(m.leftBannerColor);
+        if (m.activitiesText !== undefined) setModernActivitiesText(m.activitiesText);
+        if (m.badgeLeftText !== undefined) setModernBadgeLeftText(m.badgeLeftText);
+        if (m.badgeRightText !== undefined) setModernBadgeRightText(m.badgeRightText);
+        if (m.centerIconType !== undefined) setModernCenterIconType(m.centerIconType);
+        if (m.centerIconPreset !== undefined) setModernCenterIconPreset(m.centerIconPreset);
+        if (m.centerIconCustomUrl !== undefined) setModernCenterIconCustomUrl(m.centerIconCustomUrl);
+        if (m.barcodeImageUrl !== undefined) setModernBarcodeImageUrl(m.barcodeImageUrl);
+        if (m.showBarcode !== undefined) setModernShowBarcode(m.showBarcode);
+        if (m.showTelegram !== undefined) setModernShowTelegram(m.showTelegram);
+        if (m.telegramHandle !== undefined) setModernTelegramHandle(m.telegramHandle);
+        if (m.showFacebook !== undefined) setModernShowFacebook(m.showFacebook);
+        if (m.facebookName !== undefined) setModernFacebookName(m.facebookName);
+        if (m.showWhatsapp !== undefined) setModernShowWhatsapp(m.showWhatsapp);
+        if (m.whatsappNumber !== undefined) setModernWhatsappNumber(m.whatsappNumber);
+        if (m.showInstagram !== undefined) setModernShowInstagram(m.showInstagram);
+        if (m.instagramHandle !== undefined) setModernInstagramHandle(m.instagramHandle);
+        if (m.deliveryNote !== undefined) setModernDeliveryNote(m.deliveryNote);
+      }
+    }
+  }, [settings]);
 
   const isAdmin = currentUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    const modernHeaderConfig: ModernInvoiceHeaderConfig = {
+      badgeText: modernBadgeText.trim(),
+      fontFamily: modernFontFamily,
+      rightBannerColor: modernRightColor,
+      leftBannerColor: modernLeftColor,
+      activitiesText: modernActivitiesText.trim(),
+      badgeLeftText: modernBadgeLeftText.trim(),
+      badgeRightText: modernBadgeRightText.trim(),
+      centerIconType: modernCenterIconType,
+      centerIconPreset: modernCenterIconPreset,
+      centerIconCustomUrl: modernCenterIconCustomUrl,
+      barcodeImageUrl: modernBarcodeImageUrl,
+      showBarcode: modernShowBarcode,
+      showTelegram: modernShowTelegram,
+      telegramHandle: modernTelegramHandle.trim(),
+      showFacebook: modernShowFacebook,
+      facebookName: modernFacebookName.trim(),
+      showWhatsapp: modernShowWhatsapp,
+      whatsappNumber: modernWhatsappNumber.trim(),
+      showInstagram: modernShowInstagram,
+      instagramHandle: modernInstagramHandle.trim(),
+      deliveryNote: modernDeliveryNote.trim(),
+    };
+
     updateSettings({
       storeName: storeName.trim(),
       ownerName: ownerName.trim(),
@@ -235,6 +414,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       defaultSessionOnLaunch,
       employeePermissions,
       supervisorPermissions,
+      invoiceTemplate,
+      modernHeader: modernHeaderConfig,
     } as any);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
@@ -937,6 +1118,692 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Modern vs Classic Invoice Template Selection & Customization */}
+          <div className="bg-gradient-to-br from-indigo-50/60 via-white to-slate-50 border-2 border-indigo-200/80 rounded-2xl p-5 space-y-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-xs">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <span>تصميم وشكل ترويسة القائمة المطبوعة</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">
+                      جديد وحصري
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    اختر بين التصميم العصري الملون (الملهم من نموذج الصورة) أو التصميم الكلاسيكي المعتاد
+                  </p>
+                </div>
+              </div>
+
+              {/* Template Segmented Switch */}
+              <div className="inline-flex p-1 bg-slate-200/80 rounded-xl border border-slate-300/80 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceTemplate('modern')}
+                  className={`px-4 py-2 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                    invoiceTemplate === 'modern'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
+                      : 'text-slate-700 hover:text-slate-900'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>التصميم العصري الملون</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceTemplate('classic')}
+                  className={`px-4 py-2 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                    invoiceTemplate === 'classic'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-700 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>التصميم الكلاسيكي</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Template Details Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div
+                onClick={() => setInvoiceTemplate('modern')}
+                className={`p-3.5 rounded-xl border-2 transition cursor-pointer ${
+                  invoiceTemplate === 'modern'
+                    ? 'border-indigo-500 bg-white shadow-xs ring-2 ring-indigo-500/20'
+                    : 'border-slate-200 bg-white/60 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-black text-indigo-900 flex items-center gap-1.5">
+                    <span>🎨 التصميم العصري الملون</span>
+                    <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.2 rounded-full font-bold">
+                      موصى به
+                    </span>
+                  </span>
+                  <input
+                    type="radio"
+                    name="invoiceTemplateRadio"
+                    checked={invoiceTemplate === 'modern'}
+                    onChange={() => setInvoiceTemplate('modern')}
+                    className="text-indigo-600 focus:ring-indigo-500"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  شريط علوي ملون مزدوج، دائرة بيضوية بيضاء فوق الاسم، خطوط عربية مميزة، صورة وسطية، باركود مرفوع من الجهاز، وأيقونات رسمية لشبكات التواصل (تليغرام، فيسبوك، واتساب، انستغرام).
+                </p>
+              </div>
+
+              <div
+                onClick={() => setInvoiceTemplate('classic')}
+                className={`p-3.5 rounded-xl border-2 transition cursor-pointer ${
+                  invoiceTemplate === 'classic'
+                    ? 'border-slate-800 bg-white shadow-xs ring-2 ring-slate-800/20'
+                    : 'border-slate-200 bg-white/60 hover:bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-black text-slate-800">
+                    🏛️ التصميم الكلاسيكي التقليدي
+                  </span>
+                  <input
+                    type="radio"
+                    name="invoiceTemplateRadio"
+                    checked={invoiceTemplate === 'classic'}
+                    onChange={() => setInvoiceTemplate('classic')}
+                    className="text-slate-800 focus:ring-slate-500"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  الترويسة التقليدية بالأختام النجمية الدائرية (جملة ومفرد)، وبادئة الإدارة ونوع التجارة الرسمية المعتادة.
+                </p>
+              </div>
+            </div>
+
+            {/* Customization Controls for Modern Header */}
+            <div className="border-t border-indigo-100 pt-5 space-y-5">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-indigo-600" />
+                <h4 className="text-xs font-black text-slate-800">
+                  تخصيص عناصر وهوية التصميم العصري (الألوان، الخطوط، الباركود، وشبكات التواصل)
+                </h4>
+              </div>
+
+              {/* 1. Oval Badge Text Above Store Name */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-700">
+                    الكلمة في الدائرة البيضوية البيضاء فوق اسم المحل
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    تظهر داخل حلقة بيضاء أنيقة تعلو اسم المحل التجاري
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={modernBadgeText}
+                  onChange={(e) => setModernBadgeText(e.target.value)}
+                  placeholder="مثال: قرطاسية، سوبرماركت، أسواق، معرض، تجهيزات..."
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                />
+                {/* Fast Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 font-bold">خيارات سريعة:</span>
+                  {['قرطاسية', 'سوبرماركت', 'أسواق', 'معرض', 'تجهيزات', 'هدايا', 'أزياء', 'مخزن', 'إلكترونيات'].map((word) => (
+                    <button
+                      key={word}
+                      type="button"
+                      onClick={() => setModernBadgeText(word)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer border ${
+                        modernBadgeText === word
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                      }`}
+                    >
+                      {word}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Arabic Font Family for Store Name */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <label className="text-xs font-bold text-slate-700 block">
+                  الخط العربي المعتمد لكتابة اسم المحل في الفاتورة
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'Aref Ruqaa', name: 'خط الرقعة الأصيل', sample: 'خط الرقعة الفخم' },
+                    { id: 'Amiri', name: 'الخط الأميري الملكي', sample: 'الخط الأميري العريق' },
+                    { id: 'Reem Kufi', name: 'خط ريم الكوفي', sample: 'الخط الكوفي الهندسي' },
+                    { id: 'Cairo', name: 'خط القاهرة العصري', sample: 'خط القاهرة المتزن' },
+                    { id: 'Tajawal', name: 'خط تجوال الاحترافي', sample: 'خط تجوال الحديث' },
+                    { id: 'Changa', name: 'خط الشانغا العريض', sample: 'خط إعلاني بارز' },
+                    { id: 'El Messiri', name: 'خط المسيري المزخرف', sample: 'خط أنيق ومزخرف' },
+                    { id: 'Almarai', name: 'خط المراعي الرسمي', sample: 'خط مريح وقوي' },
+                  ].map((font) => (
+                    <button
+                      key={font.id}
+                      type="button"
+                      onClick={() => setModernFontFamily(font.id)}
+                      className={`p-2.5 rounded-xl border text-right transition cursor-pointer flex flex-col justify-between ${
+                        modernFontFamily === font.id
+                          ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-700">{font.name}</span>
+                        {modernFontFamily === font.id && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                      </div>
+                      <span
+                        className="text-sm font-bold text-slate-900 mt-2 block truncate"
+                        style={{ fontFamily: font.id }}
+                      >
+                        {storeName || font.sample}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Dual Colors Customization (Right & Left Banners) */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-700">
+                    ألوان الشريط العلوي المزدوج (الجهة اليمنى والجهة اليسرى)
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    يمكنك اختيار درجات حرة بالكامل أو اختيار حزمة متناسقة
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <input
+                      type="color"
+                      value={modernRightColor}
+                      onChange={(e) => setModernRightColor(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer border border-slate-300"
+                    />
+                    <div className="flex-1">
+                      <div className="text-[11px] font-bold text-slate-800">لون جهة الاسم والرمز (الشريط الأيمن)</div>
+                      <input
+                        type="text"
+                        value={modernRightColor}
+                        onChange={(e) => setModernRightColor(e.target.value)}
+                        className="text-xs font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200 mt-0.5 w-24"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <input
+                      type="color"
+                      value={modernLeftColor}
+                      onChange={(e) => setModernLeftColor(e.target.value)}
+                      className="w-10 h-10 rounded-lg cursor-pointer border border-slate-300"
+                    />
+                    <div className="flex-1">
+                      <div className="text-[11px] font-bold text-slate-800">لون جهة الأنشطة والمواد (الشريط الأيسر)</div>
+                      <input
+                        type="text"
+                        value={modernLeftColor}
+                        onChange={(e) => setModernLeftColor(e.target.value)}
+                        className="text-xs font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200 mt-0.5 w-24"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Preset Palettes */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] text-slate-500 font-bold block">حزم لونية متناسقة جاهزة:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { name: 'أزرق ملكي وبرتقالي (نموذج الفاتورة)', right: '#1e40af', left: '#ea580c' },
+                      { name: 'كحلي دافئ وذهبي', right: '#0f172a', left: '#d97706' },
+                      { name: 'أزرق كحلي وتيفاني', right: '#1e3a8a', left: '#0d9488' },
+                      { name: 'زمردي وبرتقالي شمسي', right: '#047857', left: '#f97316' },
+                      { name: 'بنفسجي ملكي وفوشي', right: '#6b21a8', left: '#db2777' },
+                      { name: 'فحمي داكن وأحمر قرمزي', right: '#1f2937', left: '#dc2626' },
+                    ].map((pal, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setModernRightColor(pal.right);
+                          setModernLeftColor(pal.left);
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition text-[11px] font-bold text-slate-700 flex items-center gap-2 cursor-pointer"
+                      >
+                        <div className="flex -space-x-1.5 rtl:space-x-reverse">
+                          <span className="w-3.5 h-3.5 rounded-full border border-white" style={{ backgroundColor: pal.right }}></span>
+                          <span className="w-3.5 h-3.5 rounded-full border border-white" style={{ backgroundColor: pal.left }}></span>
+                        </div>
+                        <span>{pal.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Center Illustration / Image Between The Names */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-700">
+                    الصورة أو الأيقونة في وسط الترويسة (بين الاسم والأنشطة)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setModernCenterIconType('preset')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        modernCenterIconType === 'preset'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      أيقونات جاهزة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModernCenterIconType('custom')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        modernCenterIconType === 'custom'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      رفع صورة خاصة
+                    </button>
+                  </div>
+                </div>
+
+                {modernCenterIconType === 'preset' ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+                    {[
+                      { id: 'stationery', name: 'أدوات وقرطاسية', desc: 'حقيبة وأقلام ومساطر' },
+                      { id: 'market', name: 'سوبرماركت ومواد', desc: 'سلة مشتريات وغذائيات' },
+                      { id: 'hardware', name: 'معدات وإنشائية', desc: 'أدوات وصيانة' },
+                      { id: 'gifts', name: 'هدايا وتزيين', desc: 'صناديق هدايا واحتفال' },
+                      { id: 'clothes', name: 'ملابس وأزياء', desc: 'علاقة ثياب وتطريز' },
+                      { id: 'general', name: 'تجارة عامة', desc: 'نجمة تجارية راقية' },
+                    ].map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setModernCenterIconPreset(preset.id)}
+                        className={`p-2.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center gap-1.5 ${
+                          modernCenterIconPreset === preset.id
+                            ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20'
+                            : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-xs font-bold text-slate-800">{preset.name}</span>
+                        <span className="text-[10px] text-slate-400">{preset.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <input
+                      ref={centerIconFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleCenterIconFileUpload}
+                      className="hidden"
+                    />
+                    <div className="w-16 h-16 rounded-xl bg-white border border-slate-300 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                      {modernCenterIconCustomUrl ? (
+                        <img src={modernCenterIconCustomUrl} alt="Center Icon" className="w-full h-full object-contain" />
+                      ) : (
+                        <ImageIcon className="w-6 h-6 text-slate-400" />
+                      )}
+                    </div>
+                    <div className="space-y-1 text-center sm:text-right">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => centerIconFileInputRef.current?.click()}
+                          className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>رفع صورة الوسط من الجهاز</span>
+                        </button>
+                        {modernCenterIconCustomUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setModernCenterIconCustomUrl('')}
+                            className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold transition cursor-pointer border border-rose-200"
+                          >
+                            حذف الصورة
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        يدعم ملفات JPG, PNG, WebP أو شعار المحل المخصص.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 5. Barcode & QR Code Upload From Device */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <QrCodeIcon className="w-4 h-4 text-indigo-600" />
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block">
+                        الباركود وصورته في وسط الفاتورة
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        كما طلبت: صورة الباركود تُرفع من جهازك مباشرة أو يمكنك الاعتماد على رمز الاستجابة السريع
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={modernShowBarcode}
+                      onChange={(e) => setModernShowBarcode(e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>إظهار الباركود في الترويسة</span>
+                  </label>
+                </div>
+
+                {modernShowBarcode && (
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <input
+                      ref={barcodeFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleBarcodeFileUpload}
+                      className="hidden"
+                    />
+                    <div className="w-20 h-20 rounded-xl bg-white border border-slate-300 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                      {modernBarcodeImageUrl ? (
+                        <img src={modernBarcodeImageUrl} alt="Barcode" className="w-full h-full object-contain p-1" />
+                      ) : (
+                        <div className="text-center p-1">
+                          <QrCodeIcon className="w-8 h-8 text-slate-400 mx-auto" />
+                          <span className="text-[9px] text-slate-400 font-bold block mt-1">QR تلقائي</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1 text-center sm:text-right">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => barcodeFileInputRef.current?.click()}
+                          className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>رفع صورة الباركود من الجهاز</span>
+                        </button>
+                        {modernBarcodeImageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setModernBarcodeImageUrl('')}
+                            className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold transition cursor-pointer border border-rose-200"
+                          >
+                            إلغاء الصورة (استخدام QR تلقائي)
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        {modernBarcodeImageUrl
+                          ? '✅ تم تحميل صورة الباركود بنجاح وستظهر في منتصف شريط التواصل بالفاتورة.'
+                          : 'إذا لم ترفع صورة خاصة، سيتم رسم رمز QR رقمي متقدم تلقائياً لبيانات المحل.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 6. Social Media Handles & Toggles */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Share2 className="w-4 h-4 text-indigo-600" />
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 block">
+                      معرفات وأرقام شبكات التواصل الاجتماعي (مع إمكانية إظهار أو إخفاء أي منها)
+                    </label>
+                    <p className="text-[11px] text-slate-500">
+                      تظهر في الشريط السفلي للترويسة بأيقوناتها الرسمية الملونة
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Telegram */}
+                  <div className={`p-3 rounded-xl border transition ${modernShowTelegram ? 'bg-sky-50/50 border-sky-300' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-sky-500 text-white flex items-center justify-center">
+                          <Send className="w-3 h-3" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">تليغرام (Telegram)</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-sky-800">
+                        <input
+                          type="checkbox"
+                          checked={modernShowTelegram}
+                          onChange={(e) => setModernShowTelegram(e.target.checked)}
+                          className="rounded text-sky-600 focus:ring-sky-500"
+                        />
+                        <span>إظهار</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={!modernShowTelegram}
+                      value={modernTelegramHandle}
+                      onChange={(e) => setModernTelegramHandle(e.target.value)}
+                      placeholder="@username أو رقم الهاتف"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Facebook */}
+                  <div className={`p-3 rounded-xl border transition ${modernShowFacebook ? 'bg-blue-50/50 border-blue-300' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                          f
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">فيسبوك (Facebook)</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-blue-800">
+                        <input
+                          type="checkbox"
+                          checked={modernShowFacebook}
+                          onChange={(e) => setModernShowFacebook(e.target.checked)}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>إظهار</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={!modernShowFacebook}
+                      value={modernFacebookName}
+                      onChange={(e) => setModernFacebookName(e.target.value)}
+                      placeholder="اسم الصفحة على فيسبوك"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                    />
+                  </div>
+
+                  {/* WhatsApp */}
+                  <div className={`p-3 rounded-xl border transition ${modernShowWhatsapp ? 'bg-emerald-50/50 border-emerald-300' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center">
+                          <Phone className="w-3 h-3" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">واتساب (WhatsApp)</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-emerald-800">
+                        <input
+                          type="checkbox"
+                          checked={modernShowWhatsapp}
+                          onChange={(e) => setModernShowWhatsapp(e.target.checked)}
+                          className="rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>إظهار</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={!modernShowWhatsapp}
+                      value={modernWhatsappNumber}
+                      onChange={(e) => setModernWhatsappNumber(e.target.value)}
+                      placeholder="رقم الواتساب (مثال: 07701234567)"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Instagram */}
+                  <div className={`p-3 rounded-xl border transition ${modernShowInstagram ? 'bg-pink-50/50 border-pink-300' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white flex items-center justify-center">
+                          <Instagram className="w-3 h-3" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">انستغرام (Instagram)</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-pink-800">
+                        <input
+                          type="checkbox"
+                          checked={modernShowInstagram}
+                          onChange={(e) => setModernShowInstagram(e.target.checked)}
+                          className="rounded text-pink-600 focus:ring-pink-500"
+                        />
+                        <span>إظهار</span>
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={!modernShowInstagram}
+                      value={modernInstagramHandle}
+                      onChange={(e) => setModernInstagramHandle(e.target.value)}
+                      placeholder="@instagram_handle"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-pink-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. Activities Text, Badges, & Delivery Note */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                <label className="text-xs font-bold text-slate-700 block">
+                  نص الأنشطة والمواد المتوفرة (يظهر في الشريط الأيسر الملون)
+                </label>
+                <textarea
+                  rows={2}
+                  value={modernActivitiesText}
+                  onChange={(e) => setModernActivitiesText(e.target.value)}
+                  placeholder="مثال: بيع كافة القرطاسية والمستلزمات المدرسية والمكتبية والهدايا ولعب الأطفال"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      شارة الشريط اليسرى (جملة)
+                    </label>
+                    <input
+                      type="text"
+                      value={modernBadgeLeftText}
+                      onChange={(e) => setModernBadgeLeftText(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      شارة الشريط اليمنى (مفرد)
+                    </label>
+                    <input
+                      type="text"
+                      value={modernBadgeRightText}
+                      onChange={(e) => setModernBadgeRightText(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      عبارة التوصيل (أسفل الترويسة)
+                    </label>
+                    <input
+                      type="text"
+                      value={modernDeliveryNote}
+                      onChange={(e) => setModernDeliveryNote(e.target.value)}
+                      placeholder="تتوفر خدمة التوصيل إلى كافة المحافظات"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 8. Live Interactive Preview */}
+              <div className="bg-slate-900 text-white p-4 rounded-2xl space-y-3 shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-black text-emerald-300">
+                      معاينة حية ومباشرة لشكل ترويسة الفاتورة العصرية
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    تحديث فوري مع كل تغيير
+                  </span>
+                </div>
+
+                <div className="bg-white text-slate-900 rounded-xl p-3 overflow-hidden shadow-inner border border-slate-700">
+                  <ModernInvoiceHeader
+                    settings={{
+                      ...settings,
+                      storeName: storeName || 'مكتبة وقرطاسية النور',
+                      phone: phone || '07701234567',
+                      address: address || 'العراق - بغداد - المنصور',
+                      modernHeader: {
+                        badgeText: modernBadgeText,
+                        fontFamily: modernFontFamily,
+                        rightBannerColor: modernRightColor,
+                        leftBannerColor: modernLeftColor,
+                        activitiesText: modernActivitiesText,
+                        badgeLeftText: modernBadgeLeftText,
+                        badgeRightText: modernBadgeRightText,
+                        centerIconType: modernCenterIconType,
+                        centerIconPreset: modernCenterIconPreset,
+                        centerIconCustomUrl: modernCenterIconCustomUrl,
+                        barcodeImageUrl: modernBarcodeImageUrl,
+                        showBarcode: modernShowBarcode,
+                        showTelegram: modernShowTelegram,
+                        telegramHandle: modernTelegramHandle,
+                        showFacebook: modernShowFacebook,
+                        facebookName: modernFacebookName,
+                        showWhatsapp: modernShowWhatsapp,
+                        whatsappNumber: modernWhatsappNumber,
+                        showInstagram: modernShowInstagram,
+                        instagramHandle: modernInstagramHandle,
+                        deliveryNote: modernDeliveryNote,
+                      }
+                    }}
+                    invoiceNumber="1042"
+                    isThermal={false}
+                  />
+                </div>
+              </div>
+
             </div>
           </div>
 

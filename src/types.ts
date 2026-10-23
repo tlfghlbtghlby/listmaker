@@ -223,6 +223,33 @@ export interface UserProfile {
 // أنواع مقاسات الورق المتاحة للطباعة
 export type PrintFormatType = 'a4' | 'a5' | 'thermal' | 'thermal80' | 'thermal58';
 
+export type InvoiceTemplateType = 'classic' | 'modern';
+
+export interface ModernInvoiceHeaderConfig {
+  badgeText?: string; // الكلمة في الدائرة البيضوية البيضاء فوق الاسم (مثال: قرطاسية، أسواق، تجارة، معرض...)
+  fontFamily?: string; // خط كتابة اسم المحل (Cairo, Amiri, Aref Ruqaa, Reem Kufi, Changa, El Messiri, Tajawal)
+  rightBannerColor?: string; // لون جهة الاسم (الافتراضي: #1e40af أزرق ملكي)
+  leftBannerColor?: string; // لون جهة الأنشطة (الافتراضي: #ea580c برتقالي دافئ)
+  activitiesText?: string; // نص الأنشطة والمواد (مثال: لوازم مدرسية - لوازم مكتبية - هدايا - لعب أطفال)
+  badgeLeftText?: string; // وسم الجملة (مثال: جملة)
+  badgeRightText?: string; // وسم المفرد (مثال: مفرد)
+  centerIconType?: 'preset' | 'custom'; // نوع أيقونة الوسط
+  centerIconPreset?: string; // اسم الأيقونة الجاهزة (stationery, market, hardware, clothes, electrical, gifts, general)
+  centerIconCustomUrl?: string; // رابط أو صورة مرفوعة لوسط الترويسة
+  barcodeImageUrl?: string; // صورة الباركود أو الـ QR المرفوعة من الجهاز
+  showBarcode?: boolean; // تفعيل إظهار الباركود
+  // شبكات التواصل الاجتماعي مع خيار إظهار/إخفاء كل منها
+  showTelegram?: boolean;
+  telegramHandle?: string; // معرف تليغرام
+  showFacebook?: boolean;
+  facebookName?: string; // اسم صفحة فيسبوك
+  showWhatsapp?: boolean;
+  whatsappNumber?: string; // رقم واتساب
+  showInstagram?: boolean;
+  instagramHandle?: string; // حساب انستغرام
+  deliveryNote?: string; // عبارة التوصيل (مثال: توصيل جميع المحافظات)
+}
+
 export interface StoreSettings {
   storeName: string;
   ownerName: string;
@@ -231,6 +258,8 @@ export interface StoreSettings {
   currency: string; // مثلاً: د.ع (دينار عراقي) أو $ أو ر.س
   invoiceFooterNote: string;
   printFormat: PrintFormatType; // A4 أو A5 أو رول 80 مم أو رول 58 مم
+  invoiceTemplate?: InvoiceTemplateType; // 'classic' = التقليدي ذو الأختام | 'modern' = العصري الملون
+  modernHeader?: ModernInvoiceHeaderConfig; // إعدادات الترويسة العصرية
   directPrintEnabled?: boolean; // تفعيل الطباعة الفورية الصامتة بدون نافذة حوار
   selectedPrinterName?: string; // اسم طابعة الكاشير المحددة للطباعة اللحظية في أقل من ثانية
   printerPaperSize?: PrintFormatType | string; // مقاس ورق الطابعة
