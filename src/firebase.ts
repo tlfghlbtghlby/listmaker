@@ -32,7 +32,7 @@ export const firebaseConfig = {
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// تفعيل المحرك المحلي الدائم لحفظ البيانات على القرص والمزامنة التلقائية عند عودة الإنترنت
+// تفعيل المحرك المحلي الدائم بسعة لا محدودة لضمان حفظ كل حركة على القرص الصلب
 let firestoreDb: any;
 try {
   firestoreDb = initializeFirestore(app, {
@@ -48,7 +48,7 @@ try {
 export const db = firestoreDb;
 export const isFirebaseConfigured = true;
 
-// مراقبة عودة الإنترنت للمزامنة الفورية التلقائية
+// إعادة تفعيل الشبكة فور استعادة الاتصال
 if (typeof window !== 'undefined') {
   window.addEventListener('online', async () => {
     try {
@@ -59,7 +59,7 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// دالة جلب الجلسة الدائمة فور فتح البرنامج (حتى لو بعد 100 سنة بدون نت)
+// دالة جلب الجلسة الدائمة فور فتح البرنامج (حتى لو بعد 100 سنة بدون إنترنت)
 export const getActiveLocalSession = (): UserProfile | null => {
   try {
     const session = localStorage.getItem('active_client_session');
@@ -70,12 +70,11 @@ export const getActiveLocalSession = (): UserProfile | null => {
   return null;
 };
 
-// Authentication helpers مع تخفيض استعلامات القراءة لأدنى حد
 export const loginWithEmailOrUsername = async (identifier: string, password: string) => {
   const cleanId = identifier.trim().toLowerCase();
   const cleanPass = password.trim();
 
-  // 1. حساب المدير الافتراضي للطوارئ
+  // 1. حساب المدير الافتراضي للطوارئ بدون إنترنت
   if ((cleanId === 'admin' || cleanId === ADMIN_EMAIL.toLowerCase()) && (cleanPass === 'admin123' || cleanPass === '123456')) {
     const adminUser: UserProfile = {
       uid: 'admin_root',
@@ -93,7 +92,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     return adminUser as any;
   }
 
-  // 2. التحقق من الكاش المحلي أولاً لتوفير القراءة من السيرفر تماماً
+  // 2. التحقق من الجلسة المخزنة محلياً أولاً (للبقاء مسجلاً حتى لو انقطع النت لسنوات وبدون استهلاك Firebase)
   const cached = getActiveLocalSession();
   if (
     cached &&
@@ -107,12 +106,14 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       email: cached.email,
       username: cached.username,
       displayName: cached.displayName || cached.username,
+      storeName: cached.storeName || '',
+      phone: cached.phone || '',
       password: cleanPass,
       role: cached.role || 'client',
     } as any;
   }
 
-  // 3. التحقق عبر خادم التطبيق المحلي الداخلي أولاً لتفادي احتساب قراءة من Firestore
+  // 3. التحقق عبر خادم التطبيق المحلي الداخلي Express
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -139,7 +140,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     }
   } catch (e) {}
 
-  // 4. استعلام Firestore كخيار أخير إذا لم يعثر عليه محلياً
+  // 4. استعلام Firestore كخيار أخير إذا كان النت متصلاً
   const usersRef = collection(db, 'users');
   let matchedUser: any = null;
 
@@ -153,12 +154,6 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       const snapEmail = await getDocs(qEmail);
       if (!snapEmail.empty) {
         matchedUser = snapEmail.docs[0].data();
-      } else {
-        const qPhone = query(usersRef, where('phone', '==', identifier.trim()));
-        const snapPhone = await getDocs(qPhone);
-        if (!snapPhone.empty) {
-          matchedUser = snapPhone.docs[0].data();
-        }
       }
     }
   } catch (err) {
@@ -199,6 +194,8 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     email: matchedUser.email,
     username: matchedUser.username,
     displayName: matchedUser.displayName || matchedUser.username,
+    storeName: cachedProfile.storeName,
+    phone: cachedProfile.phone,
     password: cleanPass,
     role: isAdmin ? 'admin' : 'client',
   } as any;
