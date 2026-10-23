@@ -89,7 +89,7 @@ interface AppContextType {
   updatePresetShift: (id: string, updates: Partial<PresetShift>) => Promise<void>;
   deletePresetShift: (id: string) => Promise<void>;
   addSupervisor: (sup: Omit<StoreSupervisor, 'id' | 'createdAt'>) => Promise<StoreSupervisor>;
-  updateSupervisor: (id: string, updates: Partial<StoreSupervisor>): Promise<void>;
+  updateSupervisor: (id: string, updates: Partial<StoreSupervisor>) => Promise<void>;
   deleteSupervisor: (id: string) => Promise<void>;
   activeSupervisorId: string | null;
   activeSupervisorName: string | null;
@@ -250,7 +250,6 @@ export const createDefaultDraftOrder = (orderNumber: number = 1): POSDraftOrder 
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // استدعاء الجلسة المحلية الدائمة فوراً لضمان عدم الخروج عند انقطاع الإنترنت أو إعادة التشغيل
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const active = localStorage.getItem('active_client_session');
@@ -269,7 +268,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // قراءة المخزن من الكاش المحلي على الهاردسك
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const cached = localStorage.getItem('cached_pos_products');
@@ -659,7 +657,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // دالة معالجة طابور الرفع (تُشغّل عند عودة الإنترنت أو كل 10 دقائق لرفع المواد حال تصفير الحد السحابي)
   const processPendingQueue = async () => {
     if (!navigator.onLine || !currentUser?.uid) return;
 
@@ -705,7 +702,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // مراقبة عودة الإنترنت ومؤقت دوري كل 10 دقائق لتجربة رفع المعلقات
   useEffect(() => {
     const handleOnline = async () => {
       setIsCloudConnected(true);
@@ -727,7 +723,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // فحص دوري كل 10 دقائق لمزامنة المعلقات بمجرد تصفير الحصة اليومية لفايربيس
     const interval = setInterval(processPendingQueue, 10 * 60 * 1000);
 
     return () => {
@@ -737,7 +732,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [currentUser]);
 
-  // المزامنة الحية المحصنة: لا تفرغ المخزن عند الإقلاع بدون إنترنت أو الدخول بالأدمن
   useEffect(() => {
     if (!currentUser) {
       setAuthLoading(false);
@@ -748,13 +742,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentUid = currentUser.uid;
     const isMuntazar = currentUid === MUNTAZAR_UID || currentUid === ALT_MUNTAZAR_UID || currentUser.username === 'muntazar' || currentUser.username === 'montazar';
 
-    // 1. استعلام مفلتر للمواد على مستوى السيرفر
     const itemsQuery = isMuntazar 
       ? query(collection(db, 'items'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'items'), where('ownerUid', '==', currentUid));
 
     const unsubItems = onSnapshot(itemsQuery, (snap) => {
-      // حماية صارمة: إذا كان الاستعلام من الكاش وكان فارغاً والمخزن المحلي يحتوي مواد، لا تفرغ شيئاً
       if (snap.metadata.fromCache && snap.empty && products.length > 0) {
         return;
       }
@@ -792,7 +784,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsCloudConnected(false);
     });
 
-    // 2. استعلام مفلتر للفواتير على مستوى السيرفر
     const invoicesQuery = isMuntazar
       ? query(collection(db, 'invoices'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'invoices'), where('ownerUid', '==', currentUid));
@@ -811,7 +802,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, () => {});
 
-    // 3. استعلام مفلتر للزبائن على مستوى السيرفر
     const customersQuery = isMuntazar
       ? query(collection(db, 'customers'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'customers'), where('ownerUid', '==', currentUid));
@@ -830,7 +820,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, () => {});
 
-    // 4. استعلام إعدادات المتجر الخاصة بالمستخدم
     const settingsDocId = isMuntazar ? 'store_settings' : `settings_${currentUid}`;
     const unsubSettings = onSnapshot(doc(db, 'settings', settingsDocId), (snap) => {
       if (snap.exists()) {
@@ -845,7 +834,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }, () => {});
 
-    // 5. استعلام مفلتر للشفتات على مستوى السيرفر
     const shiftsQuery = isMuntazar
       ? query(collection(db, 'shifts'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
       : query(collection(db, 'shifts'), where('ownerUid', '==', currentUid));
@@ -924,7 +912,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // ✅ دالة إضافة المادة المقاومة لانقطاع الطاقة وتجاوز الحصة السحابية
   const addProduct = (prodData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Product => {
     const now = new Date().toISOString();
     const newId = 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
@@ -939,11 +926,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: now,
     };
 
-    // 1. التحديث الفوري لواجهة التطبيق
     const updated = [newProduct, ...products];
     setProducts(updated);
 
-    // 2. الحفظ الفوري المباشر على القرص الصلب (LocalStorage) وطابور المزامنة المؤجلة
     try { 
       localStorage.setItem('cached_pos_products', JSON.stringify(updated));
       const pendingKey = `pending_sync_products_${currentUid}`;
@@ -954,7 +939,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (e) {}
 
-    // 3. الحفظ في محرك كاش Firestore مع اعتراض خطأ امتلاء الحصة
     const ref = doc(db, 'items', newId);
     setDoc(ref, sanitizeForFirestore(newProduct), { merge: true }).catch((err: any) => {
       const errorMsg = String(err?.message || err?.code || '');
@@ -965,7 +949,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // 4. حفظ احتياطي في ملف JSON المحلي لنظام ويندوز عبر Express الداخلي
     fetch(`/api/sync/${currentUid}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
