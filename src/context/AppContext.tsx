@@ -732,6 +732,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [currentUser]);
 
+  const logout = async () => {
+    setCurrentUser(null);
+    setProducts([]);
+    setCustomers([]);
+    setInvoices([]);
+    setPayments([]);
+    try {
+      localStorage.removeItem('active_client_session');
+      localStorage.removeItem('last_active_user_uid');
+      localStorage.removeItem('cached_pos_products');
+      localStorage.removeItem('cached_pos_customers');
+      localStorage.removeItem('cached_pos_invoices');
+      localStorage.removeItem('cached_pos_settings');
+      localStorage.removeItem('cached_pos_shifts');
+      localStorage.removeItem('cached_pos_active_shift');
+    } catch (e) {}
+    await logoutAccount();
+  };
+
   useEffect(() => {
     if (!currentUser) {
       setAuthLoading(false);
@@ -741,6 +760,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuthLoading(false);
     const currentUid = currentUser.uid;
     const isMuntazar = currentUid === MUNTAZAR_UID || currentUid === ALT_MUNTAZAR_UID || currentUser.username === 'muntazar' || currentUser.username === 'montazar';
+
+    let unsubUserDoc = () => {};
+    let statusCheckInterval: any = null;
+
+    const isAdmin = currentUser.role === 'admin' || 
+                    currentUid === 'admin_master_001' || 
+                    currentUid === 'admin_root' || 
+                    currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+    // مراقبة تلقائية خاصة بحسابات الزبائن (غير المدير العام): إذا تم حذف الحساب أو تعطيله يتم تسجيل الخروج فوراً
+    if (!isAdmin) {
+      unsubUserDoc = onSnapshot(doc(db, 'users', currentUid), (snap) => {
+        if (!snap.exists()) {
+          try {
+            sessionStorage.setItem('auth_logout_reason', 'deleted');
+          } catch (e) {}
+          logout();
+          return;
+        }
+        const data = snap.data();
+        if (data && data.isActive === false) {
+          try {
+            sessionStorage.setItem('auth_logout_reason', 'disabled');
+          } catch (e) {}
+          logout();
+          return;
+        }
+      }, (err) => {
+        console.warn('User status snapshot error:', err);
+      });
+
+      statusCheckInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/auth/user-status/${encodeURIComponent(currentUid)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success) {
+              if (data.exists === false) {
+                try {
+                  sessionStorage.setItem('auth_logout_reason', 'deleted');
+                } catch (e) {}
+                logout();
+              } else if (data.isActive === false) {
+                try {
+                  sessionStorage.setItem('auth_logout_reason', 'disabled');
+                } catch (e) {}
+                logout();
+              }
+            }
+          }
+        } catch (e) {}
+      }, 3000);
+    }
 
     const itemsQuery = isMuntazar 
       ? query(collection(db, 'items'), where('ownerUid', 'in', [MUNTAZAR_UID, ALT_MUNTAZAR_UID]))
@@ -866,6 +938,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubCust();
       unsubSettings();
       unsubShifts();
+      unsubUserDoc();
+      if (statusCheckInterval) clearInterval(statusCheckInterval);
     };
   }, [currentUser]);
 
@@ -1976,25 +2050,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginUser = async (user: any) => {
     setCurrentUser(user);
     setAuthLoading(false);
-  };
-
-  const logout = async () => {
-    setCurrentUser(null);
-    setProducts([]);
-    setCustomers([]);
-    setInvoices([]);
-    setPayments([]);
-    try {
-      localStorage.removeItem('active_client_session');
-      localStorage.removeItem('last_active_user_uid');
-      localStorage.removeItem('cached_pos_products');
-      localStorage.removeItem('cached_pos_customers');
-      localStorage.removeItem('cached_pos_invoices');
-      localStorage.removeItem('cached_pos_settings');
-      localStorage.removeItem('cached_pos_shifts');
-      localStorage.removeItem('cached_pos_active_shift');
-    } catch (e) {}
-    await logoutAccount();
   };
 
   return (

@@ -28,6 +28,20 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [logoutNotice, setLogoutNotice] = useState<string | null>(() => {
+    try {
+      const reason = sessionStorage.getItem('auth_logout_reason');
+      if (reason === 'deleted') {
+        sessionStorage.removeItem('auth_logout_reason');
+        return '⚠️ تم حذف هذا الحساب نهائياً من قبل الإدارة. تم تسجيل الخروج التلقائي من النظام.';
+      } else if (reason === 'disabled') {
+        sessionStorage.removeItem('auth_logout_reason');
+        return '⚠️ تم تعطيل وتجميد هذا الحساب من قبل الإدارة. تم تسجيل الخروج التلقائي. يرجى مراجعة المدير العام.';
+      }
+    } catch {}
+    return null;
+  });
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -54,7 +68,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
     } catch (err: any) {
       console.warn("Login attempt notice:", err?.message || err);
       let msg = err.message || 'بيانات الدخول غير صحيحة. يرجى التحقق من اسم المستخدم وكلمة المرور.';
-      if (
+      if (msg.includes('معطل') || msg.includes('تعطيل') || msg.includes('حذف')) {
+        // Keep the exact explanatory message
+      } else if (
         err.code === 'auth/invalid-credential' || 
         err.code === 'auth/user-not-found' || 
         err.code === 'auth/wrong-password' ||
@@ -107,6 +123,23 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
           </div>
 
           {/* Feedback messages */}
+          {logoutNotice && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-900 text-xs font-bold flex items-start gap-2.5 shadow-xs animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+              <div className="flex-1 leading-relaxed">
+                {logoutNotice}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLogoutNotice(null)}
+                className="text-amber-500 hover:text-amber-800 text-xs px-1 cursor-pointer"
+                title="إغلاق التنبيه"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {errorMessage && (
             <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />

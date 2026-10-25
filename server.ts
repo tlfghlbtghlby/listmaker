@@ -193,6 +193,46 @@ app.post('/api/auth/resolve', (req, res) => {
   }
 });
 
+app.get('/api/auth/user-status/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const cleanId = (userId || '').trim();
+
+    if (
+      cleanId.toLowerCase() === 'admin_master_001' || 
+      cleanId.toLowerCase() === 'admin_root' || 
+      cleanId.toLowerCase() === 'tlfghlbtghlby@gmail.com' ||
+      cleanId.toLowerCase() === 'admin'
+    ) {
+      return res.json({ success: true, exists: true, isActive: true, role: 'admin' });
+    }
+
+    if (!fs.existsSync(USERS_FILE)) {
+      return res.json({ success: true, exists: true, isActive: true });
+    }
+
+    const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    const matched = users.find((u: any) => 
+      u.uid === cleanId || 
+      (u.username && u.username.toLowerCase() === cleanId.toLowerCase()) ||
+      (u.email && u.email.toLowerCase() === cleanId.toLowerCase())
+    );
+
+    if (!matched) {
+      return res.json({ success: true, exists: false });
+    }
+
+    return res.json({
+      success: true,
+      exists: true,
+      isActive: matched.isActive !== false,
+      role: matched.role || 'client'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/auth/login', (req, res) => {
   try {
     const { identifier, password } = req.body;
@@ -272,7 +312,7 @@ app.post('/api/auth/login', (req, res) => {
     if (matched.isActive === false) {
       return res.status(403).json({
         success: false,
-        error: 'هذا الحساب معطل حالياً من قِبل إدارة النظام.'
+        error: 'تم تعطيل هذا الحساب من قبل الإدارة. يرجى مراجعة المدير العام.'
       });
     }
 
@@ -294,7 +334,7 @@ app.post('/api/auth/login', (req, res) => {
         phone: matched.phone,
         password: cleanPass,
         role: matched.role || 'client',
-        isActive: true,
+        isActive: matched.isActive !== false,
       }
     });
   } catch (err: any) {
@@ -394,12 +434,22 @@ app.post('/api/admin/users/:userId/status', (req, res) => {
   try {
     const { userId } = req.params;
     const { isActive } = req.body;
+    const activeBool = isActive !== false;
     if (fs.existsSync(USERS_FILE)) {
       let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-      users = users.map((u: any) => u.uid === userId ? { ...u, isActive } : u);
+      users = users.map((u: any) => {
+        if (
+          u.uid === userId || 
+          (u.username && u.username.toLowerCase() === userId.toLowerCase()) ||
+          (u.email && u.email.toLowerCase() === userId.toLowerCase())
+        ) {
+          return { ...u, isActive: activeBool, updatedAt: new Date().toISOString() };
+        }
+        return u;
+      });
       fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
     }
-    return res.json({ success: true });
+    return res.json({ success: true, isActive: activeBool });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

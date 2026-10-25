@@ -92,28 +92,7 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     return adminUser as any;
   }
 
-  // 2. التحقق من الجلسة المخزنة محلياً أولاً (للبقاء مسجلاً حتى لو انقطع النت لسنوات وبدون استهلاك Firebase)
-  const cached = getActiveLocalSession();
-  if (
-    cached &&
-    (cached.username?.toLowerCase() === cleanId || cached.email?.toLowerCase() === cleanId)
-  ) {
-    if (cached.password && String(cached.password).trim() !== cleanPass) {
-      throw new Error('كلمة المرور غير صحيحة.');
-    }
-    return {
-      uid: cached.uid,
-      email: cached.email,
-      username: cached.username,
-      displayName: cached.displayName || cached.username,
-      storeName: cached.storeName || '',
-      phone: cached.phone || '',
-      password: cleanPass,
-      role: cached.role || 'client',
-    } as any;
-  }
-
-  // 3. التحقق عبر خادم التطبيق المحلي الداخلي Express
+  // 2. التحقق من السيرفر الداخلي أولاً لمعرفة أحدث حالة للحساب (مفعل/معطل/محذوف)
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -121,7 +100,17 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       body: JSON.stringify({ identifier: identifier.trim(), password: cleanPass })
     });
     const data = await res.json();
-    if (data.success && data.user) {
+    if (!res.ok || !data.success) {
+      if (res.status === 403 || data.error?.includes('معطل') || data.error?.includes('تعطيل')) {
+        throw new Error(data.error || 'تم تعطيل هذا الحساب من قبل الإدارة. يرجى مراجعة المدير العام.');
+      }
+      if (res.status === 401 && data.error?.includes('كلمة المرور غير صحيحة')) {
+        throw new Error('كلمة المرور غير صحيحة.');
+      }
+    } else if (data.success && data.user) {
+      if (data.user.isActive === false) {
+        throw new Error('تم تعطيل هذا الحساب من قبل الإدارة. يرجى مراجعة المدير العام.');
+      }
       const u = data.user;
       const profile: UserProfile = {
         uid: u.uid,
@@ -138,9 +127,38 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
       saveLocalSession(profile);
       return profile as any;
     }
-  } catch (e) {}
+  } catch (e: any) {
+    if (e?.message && (e.message.includes('معطل') || e.message.includes('تعطيل') || e.message.includes('كلمة المرور غير صحيحة'))) {
+      throw e;
+    }
+  }
 
-  // 4. استعلام Firestore كخيار أخير إذا كان النت متصلاً
+  // 3. التحقق من الجلسة المخزنة محلياً إذا كان السيرفر غير متاح
+  const cached = getActiveLocalSession();
+  if (
+    cached &&
+    (cached.username?.toLowerCase() === cleanId || cached.email?.toLowerCase() === cleanId)
+  ) {
+    if (cached.isActive === false) {
+      throw new Error('تم تعطيل هذا الحساب من قبل الإدارة. يرجى مراجعة المدير العام.');
+    }
+    if (cached.password && String(cached.password).trim() !== cleanPass) {
+      throw new Error('كلمة المرور غير صحيحة.');
+    }
+    return {
+      uid: cached.uid,
+      email: cached.email,
+      username: cached.username,
+      displayName: cached.displayName || cached.username,
+      storeName: cached.storeName || '',
+      phone: cached.phone || '',
+      password: cleanPass,
+      role: cached.role || 'client',
+      isActive: true,
+    } as any;
+  }
+
+  // 4. استعلام Firestore كخيار إضافي إذا كان النت متصلاً
   const usersRef = collection(db, 'users');
   let matchedUser: any = null;
 
@@ -164,12 +182,12 @@ export const loginWithEmailOrUsername = async (identifier: string, password: str
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة.');
   }
 
-  if (matchedUser.password && String(matchedUser.password).trim() !== cleanPass) {
-    throw new Error('كلمة المرور غير صحيحة.');
+  if (matchedUser.isActive === false) {
+    throw new Error('تم تعطيل هذا الحساب من قبل الإدارة. يرجى مراجعة المدير العام.');
   }
 
-  if (matchedUser.isActive === false) {
-    throw new Error('تم تعطيل هذا الحساب من قبل الإدارة.');
+  if (matchedUser.password && String(matchedUser.password).trim() !== cleanPass) {
+    throw new Error('كلمة المرور غير صحيحة.');
   }
 
   const isAdmin = matchedUser.role === 'admin' || matchedUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
@@ -304,34 +322,87 @@ export const createClientAccount = async (clientData: CreateClientInput): Promis
     createdAt: new Date().toISOString()
   };
 
-  const userDocRef = doc(db, 'users', newUid);
-  await setDoc(userDocRef, newProfile);
+  try {
+    const userDocRef = doc(db, 'users', newUid);
+    await setDoc(userDocRef, newProfile);
+  } catch (e) {
+    console.warn('Firestore setDoc notice:', e);
+  }
+
+  try {
+    await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newProfile)
+    });
+  } catch (e) {}
+
   return newProfile;
 };
 
 export const loadAllClientAccounts = async (): Promise<UserProfile[]> => {
+  const accountMap = new Map<string, UserProfile>();
+
+  try {
+    const res = await fetch('/api/admin/users');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.users)) {
+        data.users.forEach((u: UserProfile) => {
+          if (u.uid) accountMap.set(u.uid, u);
+        });
+      }
+    }
+  } catch (e) {}
+
   try {
     const usersRef = collection(db, 'users');
     const snap = await getDocs(usersRef);
-    const users: UserProfile[] = [];
     snap.forEach((d) => {
       const u = d.data() as UserProfile;
-      if (u.role === 'client') users.push(u);
+      if (u.role === 'client' && u.uid) {
+        accountMap.set(u.uid, {
+          ...accountMap.get(u.uid),
+          ...u,
+          isActive: u.isActive !== false,
+        });
+      }
     });
-    return users;
-  } catch (e) {
-    return [];
-  }
+  } catch (e) {}
+
+  return Array.from(accountMap.values());
 };
 
-export const toggleClientAccountStatus = async (uid: string, currentStatus: boolean): Promise<boolean> => {
+export const toggleClientAccountStatus = async (uid: string, targetStatus: boolean): Promise<boolean> => {
+  const finalStatus = Boolean(targetStatus);
+
   try {
     const userDocRef = doc(db, 'users', uid);
-    await updateDoc(userDocRef, { isActive: !currentStatus });
-    return !currentStatus;
+    await updateDoc(userDocRef, { isActive: finalStatus });
   } catch (e) {
-    return currentStatus;
+    console.warn('Firestore toggle status warning:', e);
   }
+
+  try {
+    await fetch(`/api/admin/users/${encodeURIComponent(uid)}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: finalStatus })
+    });
+  } catch (e) {}
+
+  try {
+    const activeStr = localStorage.getItem('active_client_session');
+    if (activeStr) {
+      const activeObj = JSON.parse(activeStr);
+      if (activeObj.uid === uid) {
+        activeObj.isActive = finalStatus;
+        localStorage.setItem('active_client_session', JSON.stringify(activeObj));
+      }
+    }
+  } catch (e) {}
+
+  return finalStatus;
 };
 
 export const updateClientAccount = async (updates: UpdateClientInput): Promise<boolean> => {
@@ -345,18 +416,56 @@ export const updateClientAccount = async (updates: UpdateClientInput): Promise<b
     if (updates.isActive !== undefined) dataToUpdate.isActive = updates.isActive;
 
     await updateDoc(userDocRef, dataToUpdate);
-    return true;
   } catch (e) {
-    return false;
+    console.warn('Firestore updateClientAccount notice:', e);
   }
+
+  try {
+    await fetch(`/api/admin/users/${encodeURIComponent(updates.uid)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+  } catch (e) {}
+
+  try {
+    const activeStr = localStorage.getItem('active_client_session');
+    if (activeStr) {
+      const activeObj = JSON.parse(activeStr);
+      if (activeObj.uid === updates.uid) {
+        const merged = { ...activeObj, ...updates };
+        localStorage.setItem('active_client_session', JSON.stringify(merged));
+      }
+    }
+  } catch (e) {}
+
+  return true;
 };
 
 export const deleteClientAccount = async (uid: string): Promise<boolean> => {
   try {
     const userDocRef = doc(db, 'users', uid);
     await deleteDoc(userDocRef);
-    return true;
   } catch (e) {
-    return false;
+    console.warn('Firestore deleteDoc notice:', e);
   }
+
+  try {
+    await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
+      method: 'DELETE'
+    });
+  } catch (e) {}
+
+  try {
+    const activeStr = localStorage.getItem('active_client_session');
+    if (activeStr) {
+      const activeObj = JSON.parse(activeStr);
+      if (activeObj.uid === uid) {
+        localStorage.removeItem('active_client_session');
+        localStorage.removeItem('last_active_user_uid');
+      }
+    }
+  } catch (e) {}
+
+  return true;
 };
