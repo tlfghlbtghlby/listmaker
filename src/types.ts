@@ -71,6 +71,18 @@ export interface ReturnedItemRecord {
   returnedBy?: string; // منفذ العملية
 }
 
+export interface SalesRep {
+  id: string;
+  name: string; // اسم المندوب
+  phone: string; // رقم هاتف المندوب
+  commissionRate: number; // نسبة المندوب المئوية (مثلاً 5 تعني 5%)
+  commissionType: 'percentage_profit' | 'percentage_sales'; // النسبة من صافي الأرباح أو من إجمالي المبيعات
+  showOnInvoice: boolean; // خيار إظهار أو إخفاء اسمه في القائمة المطبوعة
+  notes?: string;
+  isActive: boolean; // هل المندوب نشط حالياً
+  createdAt: string;
+}
+
 export interface Invoice {
   id: string;
   invoiceNumber: string; // رقم القائمة
@@ -96,6 +108,13 @@ export interface Invoice {
   returnedItems?: ReturnedItemRecord[]; // سجل المواد المرتجعة مع أسبابها
   totalReturnedAmount?: number; // إجمالي المبالغ المسترجعة
   isPartiallyReturned?: boolean; // وسم يوضح إذا كانت القائمة مسترجعة جزئياً
+  
+  // بيانات مبيعات المندوب
+  salesRepId?: string; // معرف المندوب
+  salesRepName?: string; // اسم المندوب
+  salesRepCommission?: number; // ربح / عمولة المندوب المحسوبة
+  storeNetProfit?: number; // أرباح المالك الصافية بعد خصم عمولة المندوب
+  showRepOnInvoice?: boolean; // خيار إظهار اسم المندوب في القائمة المطبوعة
 }
 
 // مسودة قائمة نشطة أو معلقة في نقطة البيع
@@ -113,6 +132,8 @@ export interface POSDraftOrder {
   dueDate: string;
   notes: string;
   updatedAt: string;
+  selectedSalesRepId?: string; // المندوب المختار لهذه القائمة
+  showRepOnInvoice?: boolean; // إظهار اسمه في القائمة المطبوعة
 }
 
 export interface ShiftItemSold {
@@ -155,8 +176,41 @@ export interface Shift {
   itemsSold: ShiftItemSold[]; // قائمة المواد المباعة وإحصائيات كل مادة
   presetShiftId?: string; // معرف الشفت المعد مسبقاً
   presetShiftName?: string; // اسم الشفت المعد مسبقاً
+  sessionId?: string; // معرف جلسة الجهاز التي فتحت هذا الشفت
+  deviceId?: string; // معرف الجهاز المحدد (للعمل المتزامن لعدة أجهزة)
+  deviceName?: string; // اسم الجهاز (مثال: هاتف سامسونج، كمبيوتر المحاسبة)
+  deviceType?: 'desktop' | 'mobile' | 'tablet';
   notes?: string;
   createdAt: string;
+}
+
+// واجهة جلسة الجهاز المسجل في النظام
+export interface DeviceSession {
+  id: string; // معرف الجلسة sessionId
+  deviceId: string; // معرف الجهاز المستمر
+  userId: string; // معرف المستخدم أو صاحب المتجر
+  deviceName: string; // اسم الجهاز بالعربية (مثال: كمبيوتر ويندوز، هاتف أندرويد)
+  deviceType: 'desktop' | 'mobile' | 'tablet'; // نوع الجهاز
+  os: string; // نظام التشغيل
+  browser: string; // المتصفح
+  location: string; // الموقع التقريبي والمنطقة الزمنية
+  ip?: string; // عنوان الآي بي
+  isCurrentDevice?: boolean; // هل هذا الجهاز هو الجهاز الحالي
+  lastActive: string; // وقت آخر نشاط للجلسة
+  activeShiftId?: string | null; // الشفت المفتوح في هذا الجهاز حالياً
+  activeShiftName?: string | null; // اسم الشفت المفتوح
+  createdAt: string;
+}
+
+// مجموعة المواد المكررة للمراجعة والحذف
+export interface DuplicateProductGroup {
+  id: string; // معرف المجموعة
+  matchType: 'barcode' | 'exact_details' | 'both'; // سبب التطابق: باركود أو تشابه كامل
+  matchLabel: string; // وصف سبب التطابق بالعربية
+  matchKey: string; // القيمة المطابقة
+  primaryItem: Product; // المادة الأساسية (الأقدم أو ذات المخزون)
+  duplicateItems: Product[]; // المواد المكررة المقترح حذفها
+  allProducts: Product[]; // جميع المواد في المجموعة
 }
 
 // قالب شفت معد مسبقاً له اسم ورمز سري خاص
@@ -189,6 +243,11 @@ export interface CreateInvoiceInput {
   paidAmount: number;
   paymentDueDate?: string;
   notes?: string;
+  salesRepId?: string;
+  salesRepName?: string;
+  salesRepCommission?: number;
+  storeNetProfit?: number;
+  showRepOnInvoice?: boolean;
 }
 
 export interface PaymentRecord {
@@ -280,6 +339,15 @@ export interface StoreSettings {
   employeePermissions?: Partial<RolePermissions>; // تخصيص صلاحيات الموظف
   supervisorPermissions?: Partial<RolePermissions>; // تخصيص صلاحيات المشرف
   defaultSessionOnLaunch?: SessionRole; // الجلسة الافتراضية عند فتح البرنامج
+
+  // إعدادات نظام المندوبين وتوزيع الأرباح
+  enableSalesReps?: boolean; // تفعيل أو إطفاء ميزة بيع القوائم بواسطة المندوبين
+  salesReps?: SalesRep[]; // قائمة المندوبين المسجلين
+  defaultShowRepOnInvoice?: boolean; // الإعداد الافتراضي لإظهار اسم المندوب في القوائم المطبوعة
+  repCommissionDefaultType?: 'percentage_profit' | 'percentage_sales'; // طريقة احتساب العمولة الافتراضية
+
+  // مظهر وثيم البرنامج
+  theme?: 'light' | 'dark'; // المظهر: فاتح أو داكن متناسق مع هوية المفكر الحسابي
 }
 
 // اسم مستعار لضمان التوافق مع أي استدعاء باسم Settings في التطبيق
@@ -301,6 +369,7 @@ export interface RolePermissions {
   canAccessShifts: boolean; // الدخول لسجل وتبويب الشفتات
   canManageShifts: boolean; // بدء وإنهاء الشفت وحفظه
   canConfigureShifts: boolean; // إعداد وتعديل وحذف الشفتات المسبقة
+  canManageSalesReps?: boolean; // الدخول وإدارة نظام المندوبين
 }
 
 export const DEFAULT_EMPLOYEE_PERMISSIONS: RolePermissions = {
@@ -317,6 +386,7 @@ export const DEFAULT_EMPLOYEE_PERMISSIONS: RolePermissions = {
   canAccessShifts: true,
   canManageShifts: true,
   canConfigureShifts: false,
+  canManageSalesReps: false,
 };
 
 export const DEFAULT_SUPERVISOR_PERMISSIONS: RolePermissions = {
@@ -333,6 +403,7 @@ export const DEFAULT_SUPERVISOR_PERMISSIONS: RolePermissions = {
   canAccessShifts: true,
   canManageShifts: true,
   canConfigureShifts: true,
+  canManageSalesReps: true,
 };
 
 export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = {
@@ -349,4 +420,5 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = {
   canAccessShifts: true,
   canManageShifts: true,
   canConfigureShifts: true,
+  canManageSalesReps: true,
 };

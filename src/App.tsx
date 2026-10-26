@@ -9,6 +9,7 @@ import { CustomersView } from './components/CustomersView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { ShiftsView } from './components/ShiftsView';
+import { SalesRepsView } from './components/SalesRepsView';
 import { ProductModal } from './components/ProductModal';
 import { InvoicePrintModal } from './components/InvoicePrintModal';
 import { SessionSwitchModal } from './components/SessionSwitchModal';
@@ -16,6 +17,7 @@ import { StartShiftModal } from './components/StartShiftModal';
 import { EndShiftModal } from './components/EndShiftModal';
 import { ShiftDetailsModal } from './components/ShiftDetailsModal';
 import { AuthView } from './components/AuthView';
+import { SplashScreen } from './components/SplashScreen';
 import { Product, Invoice } from './types';
 import { 
   Boxes, 
@@ -50,6 +52,7 @@ const MainContent: React.FC = () => {
         case 'invoices': return hasPermission('canViewInvoices');
         case 'customers': return hasPermission('canViewCustomers');
         case 'reports': return hasPermission('canViewReports');
+        case 'sales-reps': return !!settings.enableSalesReps && (hasPermission('canManageSalesReps') || sessionRole === 'admin' || sessionRole === 'supervisor');
         case 'shifts': return hasPermission('canAccessShifts');
         case 'settings': return hasPermission('canAccessSettings');
         default: return true;
@@ -195,7 +198,7 @@ const MainContent: React.FC = () => {
   };
 
   return (
-    <div className={`min-h-screen flex flex-col bg-slate-100 text-slate-800 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-emerald-600' : ''}`}>
+    <div className={`min-h-screen flex flex-col bg-slate-100 dark:bg-[#070d18] text-slate-800 dark:text-slate-100 transition-colors duration-200 print:min-h-0 print:h-auto print:block print:bg-white ${isMobile ? 'selection:bg-amber-500' : 'selection:bg-amber-500 selection:text-slate-950'}`}>
       <Header 
         onOpenAuth={() => setIsGuest(false)}
       />
@@ -350,6 +353,12 @@ const MainContent: React.FC = () => {
           <ReportsView />
         )}
 
+        {activeTab === 'sales-reps' && (
+          <SalesRepsView
+            onViewInvoice={(inv) => setInvoiceToPrint(inv)}
+          />
+        )}
+
         {activeTab === 'settings' && (
           <SettingsView initialTab={settingsInitialTab} />
         )}
@@ -400,9 +409,15 @@ const MainContent: React.FC = () => {
 };
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
+
   return (
     <AppProvider>
-      <MainContent />
+      {showSplash ? (
+        <SplashScreen onComplete={() => setShowSplash(false)} />
+      ) : (
+        <MainContent />
+      )}
     </AppProvider>
   );
 }

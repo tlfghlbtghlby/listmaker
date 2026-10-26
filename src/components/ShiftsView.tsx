@@ -22,10 +22,16 @@ import {
   KeyRound,
   Lock,
   CheckCircle2,
-  X
+  X,
+  Monitor,
+  Smartphone,
+  Globe,
+  Cpu,
+  Users
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Shift, Invoice, PresetShift } from '../types';
+import { ActiveSessionsModal } from './ActiveSessionsModal';
 
 interface ShiftsViewProps {
   onViewInvoice?: (invoice: Invoice) => void;
@@ -46,8 +52,16 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ onViewInvoice }) => {
     settings,
     addPresetShift,
     updatePresetShift,
-    deletePresetShift
+    deletePresetShift,
+    currentDeviceId,
+    deviceSessions,
+    isActiveSessionsModalOpen,
+    setIsActiveSessionsModalOpen
   } = useApp();
+
+  const otherActiveShifts = useMemo(() => {
+    return shifts.filter(s => s.status === 'active' && s.id !== activeShift?.id);
+  }, [shifts, activeShift]);
 
   const [mainTab, setMainTab] = useState<'records' | 'presets'>('records');
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('all');
@@ -267,30 +281,45 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ onViewInvoice }) => {
           </div>
         </div>
 
-        {/* Start / End shift button */}
-        {hasPermission('canManageShifts') && (
-          <div>
-            {!activeShift ? (
-              <button
-                type="button"
-                onClick={() => setIsStartShiftModalOpen(true)}
-                className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md shadow-indigo-600/20 active:scale-98"
-              >
-                <Play className="w-4 h-4 fill-current" />
-                <span>بدء شفت جديد وتشغيل المؤقت</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsEndShiftModalOpen(true)}
-                className="w-full sm:w-auto px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md shadow-amber-600/20 active:scale-98"
-              >
-                <CheckCircle className="w-4 h-4" />
-                <span>إنهاء الشفت الجاري وحفظ السجل</span>
-              </button>
-            )}
-          </div>
-        )}
+        {/* Buttons: Sessions + Start/End Shift */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsActiveSessionsModalOpen(true)}
+            className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer shadow-xs"
+            title="عرض الأجهزة والهواتف المتصلة ومواقعها والشفت المفتوح على كل جهاز"
+          >
+            <Cpu className="w-4 h-4 text-emerald-400" />
+            <span>جلسات الأجهزة المتصلة</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold">
+              {deviceSessions.length}
+            </span>
+          </button>
+
+          {hasPermission('canManageShifts') && (
+            <div>
+              {!activeShift ? (
+                <button
+                  type="button"
+                  onClick={() => setIsStartShiftModalOpen(true)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md shadow-indigo-600/20 active:scale-98"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>بدء شفت جديد في هذا الجهاز</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsEndShiftModalOpen(true)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md shadow-amber-600/20 active:scale-98"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>إنهاء شفت هذا الجهاز</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Sub-Tabs: سجل الشفتات | إعداد قوالب الشفتات (للأدمن والمشرف المخول) */}
@@ -609,6 +638,81 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ onViewInvoice }) => {
         </div>
       )}
 
+      {/* شفتات الأجهزة المتصلة الأخرى النشطة في نفس الوقت */}
+      {otherActiveShifts.length > 0 && (
+        <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 shadow-2xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-200/80 pb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold">
+                <Monitor className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-indigo-950">
+                  شفتات نشطة في أجهزة أخرى في نفس الوقت ({otherActiveShifts.length})
+                </h4>
+                <p className="text-[11px] text-indigo-700">
+                  محطات كاشير وهواتف أخرى تعمل بالتوازي ومبيعاتها معزولة ومستقلة لحظياً دون تداخل.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsActiveSessionsModalOpen(true)}
+              className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline cursor-pointer self-start sm:self-auto"
+            >
+              معاينة كافة الجلسات والأجهزة
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {otherActiveShifts.map((otherShift) => {
+              const stats = getShiftStats(otherShift);
+              return (
+                <div
+                  key={otherShift.id}
+                  className="bg-white border border-indigo-100 rounded-xl p-3 shadow-2xs flex flex-col justify-between gap-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        <span className="font-bold text-xs text-slate-900">
+                          {otherShift.presetShiftName || `شفت #${otherShift.shiftNumber}`}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        الكاشير: <strong className="text-slate-700">{otherShift.openedBy?.name}</strong>
+                      </span>
+                      <span className="text-[10px] text-slate-400 block">
+                        الجهاز: {otherShift.deviceName || 'جهاز متصل'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md">
+                      نشط الآن
+                    </span>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">المبيعات:</span>
+                      <span className="font-black text-slate-800">{formatMoney(stats.totalSales)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleShowDetails(otherShift)}
+                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-[11px] transition cursor-pointer flex items-center gap-1"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>عرض</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Period KPI Summary Banner */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Total Shifts Sales */}
@@ -874,6 +978,12 @@ export const ShiftsView: React.FC<ShiftsViewProps> = ({ onViewInvoice }) => {
       )}
       </>
       )}
+
+      {/* نافذة استعراض وإدارة جلسات الأجهزة المتصلة */}
+      <ActiveSessionsModal
+        isOpen={isActiveSessionsModalOpen}
+        onClose={() => setIsActiveSessionsModalOpen(false)}
+      />
     </div>
   );
 };

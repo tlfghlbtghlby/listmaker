@@ -619,6 +619,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>السيد:</span>
                     <span className="font-bold underline">{invoice.customerName}</span>
                   </div>
+                  {invoice.salesRepName && (invoice.showRepOnInvoice ?? true) && (
+                    <div className="flex items-center gap-1.5 border-r border-black/40 pr-2">
+                      <span>المندوب:</span>
+                      <span className="font-bold underline">{invoice.salesRepName}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Items Table */}
@@ -743,6 +749,40 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                   <div>توقيع المستلم: .....................</div>
                   <div>توقيع البائع: .....................</div>
                 </div>
+
+                {/* العلامة المائية الرسمية في الزاويتين السفليتين */}
+                <div className="pt-3 mt-2 border-t border-slate-300 print:border-black/30 flex items-center justify-between px-2 text-[10px] text-slate-500 select-none">
+                  {/* الزاوية السفلية اليمنى */}
+                  <div className="flex items-center gap-2 opacity-75 print:opacity-40">
+                    <img 
+                      src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+                      alt="شعار المفكر" 
+                      className="w-6 h-6 rounded-full object-cover border border-slate-400 print:border-black shrink-0"
+                    />
+                    <div className="text-right leading-tight">
+                      <div className="font-bold text-[10px] text-slate-800 print:text-black">برنامج المفكر الحسابي</div>
+                      <div className="text-[8px] text-slate-500 print:text-black">المفكر سمارت • نظام معتمد</div>
+                    </div>
+                  </div>
+
+                  {/* نص توثيق وسطي خفيف */}
+                  <div className="text-[8px] font-mono text-slate-400 print:text-black/60 text-center hidden sm:block">
+                    AL-MUFAKIR SMART POS SYSTEM
+                  </div>
+
+                  {/* الزاوية السفلية اليسرى */}
+                  <div className="flex items-center gap-2 opacity-75 print:opacity-40" dir="ltr">
+                    <img 
+                      src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+                      alt="Al-Mufakir Smart" 
+                      className="w-6 h-6 rounded-full object-cover border border-slate-400 print:border-black shrink-0"
+                    />
+                    <div className="text-left leading-tight">
+                      <div className="font-bold text-[10px] text-slate-800 print:text-black">Al-Mufakir Smart</div>
+                      <div className="text-[8px] text-slate-500 print:text-black">POS System • Verified</div>
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : (
               /* Thermal Roll Format (58mm / 80mm) */
@@ -777,6 +817,12 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                     <span>العميل:</span>
                     <span className="font-bold">{invoice.customerName}</span>
                   </div>
+                  {invoice.salesRepName && (invoice.showRepOnInvoice ?? true) && (
+                    <div className="flex justify-between">
+                      <span>المندوب:</span>
+                      <span className="font-bold">{invoice.salesRepName}</span>
+                    </div>
+                  )}
                 </div>
 
                 <table className="w-full text-right text-[10px] border-collapse">
@@ -863,6 +909,27 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({ invoice, o
                 
                 <div className="text-center text-[9px] text-slate-600 pt-1">
                   شكراً لزيارتكم
+                </div>
+
+                {/* علامة مائية في الزاويتين السفليتين للإيصال الحراري */}
+                <div className="pt-2 mt-1 border-t border-dashed border-black/40 flex items-center justify-between text-[8px] text-slate-700 select-none opacity-85 print:opacity-40">
+                  <div className="flex items-center gap-1">
+                    <img 
+                      src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+                      alt="المفكر" 
+                      className="w-4 h-4 rounded-full object-cover border border-black/70 shrink-0"
+                    />
+                    <span className="font-bold text-[8px]">المفكر الحسابي</span>
+                  </div>
+
+                  <div className="flex items-center gap-1" dir="ltr">
+                    <span className="font-bold text-[8px]">Al-Mufakir</span>
+                    <img 
+                      src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+                      alt="Smart" 
+                      className="w-4 h-4 rounded-full object-cover border border-black/70 shrink-0"
+                    />
+                  </div>
                 </div>
               </div>
             )}

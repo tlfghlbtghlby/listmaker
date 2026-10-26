@@ -16,10 +16,12 @@ import {
   Filter,
   Box,
   Scan,
-  Zap
+  Zap,
+  Copy
 } from 'lucide-react';
 import { getCartonBreakdown } from '../utils/cartonUtils';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { DuplicateProductsModal } from './DuplicateProductsModal';
 
 interface InventoryViewProps {
   onOpenNewProduct: () => void;
@@ -32,7 +34,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onEditProduct,
   onOpenQuickAdd,
 }) => {
-  const { products, deleteProduct, adjustStock, formatMoney, settings, sessionRole } = useApp();
+  const { 
+    products, 
+    deleteProduct, 
+    adjustStock, 
+    formatMoney, 
+    settings, 
+    sessionRole,
+    duplicateGroups,
+    isDuplicatesModalOpen,
+    setIsDuplicatesModalOpen
+  } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -233,7 +245,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* زر كشف وإلغاء المواد المكررة */}
+            <button
+              type="button"
+              onClick={() => setIsDuplicatesModalOpen(true)}
+              className={`px-3 py-2 text-xs font-bold rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
+                duplicateGroups.length > 0
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 ring-2 ring-amber-400/30 shadow-2xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+              }`}
+              title="كشف المواد المكررة بالباركود أو المتطابقة بنسبة 100% وإلغاؤها وحذفها"
+            >
+              <Copy className="w-3.5 h-3.5 text-amber-600" />
+              <span>فحص المواد المكررة</span>
+              {duplicateGroups.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-600 text-white text-[10px] font-black">
+                  {duplicateGroups.reduce((sum, g) => sum + g.duplicateItems.length, 0)} مكرر
+                </span>
+              )}
+            </button>
+
             <button
               onClick={handleExportCSV}
               className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 flex items-center gap-1.5 transition"
@@ -562,6 +594,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           setIsScannerOpen(false);
         }}
         title="مسح باركود المادة في المخزن"
+      />
+
+      <DuplicateProductsModal
+        isOpen={isDuplicatesModalOpen}
+        onClose={() => setIsDuplicatesModalOpen(false)}
       />
 
     </div>

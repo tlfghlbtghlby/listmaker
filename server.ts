@@ -519,6 +519,124 @@ app.delete('/api/admin/users/:userId', (req, res) => {
   }
 });
 
+const SESSIONS_FILE = path.join(DATA_DIR, 'active_sessions.json');
+
+// استرجاع معلومات جهاز المتصل وعنوان الـ IP
+app.get('/api/device-info', (req, res) => {
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '';
+  res.json({
+    success: true,
+    ip: ip.replace(/^.*:/, '') || '127.0.0.1',
+    userAgent: req.headers['user-agent'] || '',
+  });
+});
+
+// استرجاع قائمة جلسات الأجهزة النشطة لحساب معين
+app.get('/api/sessions/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const cleanUid = (userId || '').trim();
+    if (!fs.existsSync(SESSIONS_FILE)) {
+      return res.json({ success: true, sessions: [] });
+    }
+    const allSessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+    const userSessions = allSessions.filter((s: any) => s.userId === cleanUid);
+    return res.json({ success: true, sessions: userSessions });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// تسجيل أو تحديث نبضة الجلسة (Heartbeat) للجهاز الحالي
+app.post('/api/sessions/heartbeat', (req, res) => {
+  try {
+    const { 
+      userId, 
+      sessionId, 
+      deviceId, 
+      deviceName, 
+      deviceType, 
+      os, 
+      browser, 
+      location, 
+      activeShiftId,
+      activeShiftName 
+    } = req.body;
+
+    if (!userId || !deviceId) {
+      return res.status(400).json({ success: false, error: 'User ID and Device ID are required' });
+    }
+
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '';
+
+    let sessions = [];
+    if (fs.existsSync(SESSIONS_FILE)) {
+      try {
+        sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+      } catch (e) {
+        sessions = [];
+      }
+    }
+
+    const sid = sessionId || `sess_${userId}_${deviceId}`;
+    const now = new Date().toISOString();
+
+    const existingIndex = sessions.findIndex((s: any) => s.id === sid || (s.userId === userId && s.deviceId === deviceId));
+
+    const sessionObj = {
+      id: sid,
+      deviceId,
+      userId,
+      deviceName: deviceName || 'جهاز غير معروف',
+      deviceType: deviceType || 'desktop',
+      os: os || '',
+      browser: browser || '',
+      location: location || 'العراق (موقع تقريبي)',
+      ip: ip.replace(/^.*:/, '') || '127.0.0.1',
+      lastActive: now,
+      activeShiftId: activeShiftId !== undefined ? activeShiftId : (existingIndex >= 0 ? sessions[existingIndex].activeShiftId : null),
+      activeShiftName: activeShiftName !== undefined ? activeShiftName : (existingIndex >= 0 ? sessions[existingIndex].activeShiftName : null),
+      createdAt: existingIndex >= 0 ? sessions[existingIndex].createdAt : now,
+    };
+
+    if (existingIndex >= 0) {
+      sessions[existingIndex] = sessionObj;
+    } else {
+      sessions.unshift(sessionObj);
+    }
+
+    // تنظيف الجلسات القديمة التي لم تنشط منذ أكثر من 45 يوماً
+    const cutoff = Date.now() - 45 * 24 * 60 * 60 * 1000;
+    sessions = sessions.filter((s: any) => new Date(s.lastActive).getTime() > cutoff);
+
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+
+    const userSessions = sessions.filter((s: any) => s.userId === userId);
+    return res.json({ success: true, session: sessionObj, sessions: userSessions });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// إنهاء أو تسجيل خروج جلسة جهاز محدد
+app.delete('/api/sessions/:userId/:sessionId', (req, res) => {
+  try {
+    const { userId, sessionId } = req.params;
+    if (fs.existsSync(SESSIONS_FILE)) {
+      let sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+      sessions = sessions.filter((s: any) => !(s.userId === userId && s.id === sessionId));
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+      const userSessions = sessions.filter((s: any) => s.userId === userId);
+      return res.json({ success: true, sessions: userSessions });
+    }
+    return res.json({ success: true, sessions: [] });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production' || fs.existsSync(path.join(__dirname, 'dist'));
 

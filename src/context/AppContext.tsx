@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   collection, 
   doc, 
@@ -35,8 +35,17 @@ import {
   ReturnedItemRecord, 
   POSDraftOrder, 
   PresetShift, 
-  StoreSupervisor 
+  StoreSupervisor,
+  DeviceSession,
+  DuplicateProductGroup,
+  SalesRep
 } from '../types';
+import { 
+  getOrCreateDeviceId, 
+  getOrCreateSessionId, 
+  detectSystemInfo 
+} from '../utils/deviceSession';
+import { findDuplicateGroups } from '../utils/duplicateCleaner';
 
 export interface CustomBackupOptions {
   scope: 'all' | 'products_only' | 'settings_only' | 'custom';
@@ -146,6 +155,23 @@ interface AppContextType {
   targetSupervisorIdForModal: string | null;
   setTargetSupervisorIdForModal: (id: string | null) => void;
   openSessionModal: (targetRole?: SessionRole, targetSupervisorId?: string) => void;
+  currentDeviceId: string;
+  currentSessionId: string;
+  deviceSessions: DeviceSession[];
+  refreshSessions: () => Promise<void>;
+  terminateSession: (sessionId: string) => Promise<{ success: boolean }>;
+  isDuplicatesModalOpen: boolean;
+  setIsDuplicatesModalOpen: (open: boolean) => void;
+  isActiveSessionsModalOpen: boolean;
+  setIsActiveSessionsModalOpen: (open: boolean) => void;
+  duplicateGroups: DuplicateProductGroup[];
+  refreshDuplicates: () => DuplicateProductGroup[];
+  addSalesRep: (rep: Omit<SalesRep, 'id' | 'createdAt'>) => Promise<SalesRep>;
+  updateSalesRep: (id: string, updates: Partial<SalesRep>) => Promise<void>;
+  deleteSalesRep: (id: string) => Promise<void>;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+  toggleTheme: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -154,7 +180,7 @@ const MUNTAZAR_UID = "0A6uEqBONPdjOjAEFO0pgfyTs082";
 const ALT_MUNTAZAR_UID = "LS8HLUUCZUbYvMoP7lZLAY9Zghf1";
 
 const defaultEmptySettings: StoreSettings = {
-  storeName: 'نظام المبيعات والمخزن',
+  storeName: 'برنامج المفكر الحسابي',
   ownerName: '',
   phone: '',
   address: '',
@@ -213,6 +239,11 @@ const defaultEmptySettings: StoreSettings = {
       createdAt: '2026-01-01T00:00:00.000Z',
     }
   ],
+  enableSalesReps: false,
+  salesReps: [],
+  defaultShowRepOnInvoice: true,
+  repCommissionDefaultType: 'percentage_profit',
+  theme: 'dark',
 };
 
 export const sanitizeForFirestore = <T = any>(obj: T): T => {
@@ -305,10 +336,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  const [currentDeviceId] = useState<string>(() => getOrCreateDeviceId());
+  const currentSessionId = useMemo(() => {
+    return getOrCreateSessionId(currentUser?.uid || 'local');
+  }, [currentUser]);
+
+  const [deviceSessions, setDeviceSessions] = useState<DeviceSession[]>([]);
+  const [isDuplicatesModalOpen, setIsDuplicatesModalOpen] = useState(false);
+  const [isActiveSessionsModalOpen, setIsActiveSessionsModalOpen] = useState(false);
+
   const [activeShift, setActiveShift] = useState<Shift | null>(() => {
     try {
+      const devId = getOrCreateDeviceId();
+      const cachedDev = localStorage.getItem(`cached_pos_active_shift_${devId}`);
+      if (cachedDev) return JSON.parse(cachedDev);
       const cached = localStorage.getItem('cached_pos_active_shift');
-      return cached ? JSON.parse(cached) : null;
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (!parsed.deviceId || parsed.deviceId === devId) return parsed;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -321,11 +368,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<StoreSettings>(() => {
     try {
       const cached = localStorage.getItem('cached_pos_settings');
-      return cached ? JSON.parse(cached) : defaultEmptySettings;
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.storeName === 'نظام المبيعات والمخزن' || !parsed.storeName) {
+          parsed.storeName = 'برنامج المفكر الحسابي';
+        }
+        return parsed;
+      }
+      return defaultEmptySettings;
     } catch {
       return defaultEmptySettings;
     }
   });
+
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('mufakir_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+      const cachedSettings = localStorage.getItem('cached_pos_settings');
+      if (cachedSettings) {
+        const parsed = JSON.parse(cachedSettings);
+        if (parsed.theme === 'light' || parsed.theme === 'dark') return parsed.theme;
+      }
+    } catch {}
+    return 'dark'; // الوضع الداكن هو الافتراضي ليتطابق مع فخامة شعار المفكر سمارت
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+    try {
+      localStorage.setItem('mufakir_theme', theme);
+    } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      updateSettings({ theme: next });
+      return next;
+    });
+  };
 
   const [draftOrders, setDraftOrders] = useState<POSDraftOrder[]>(() => {
     try {
@@ -357,9 +445,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [draftOrders, activeDraftId]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('cached_pos_draft_orders', JSON.stringify(draftOrders));
-    } catch (e) {}
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('cached_pos_draft_orders', JSON.stringify(draftOrders));
+      } catch (e) {}
+    }, 250);
+    return () => clearTimeout(timer);
   }, [draftOrders]);
 
   useEffect(() => {
@@ -921,14 +1012,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.setItem('cached_pos_shifts', JSON.stringify(list));
       } catch (e) {}
 
-      const running = list.find((s: Shift) => s.status === 'active');
-      if (running) {
-        setActiveShift(running);
+      // العثور على الشفت النشط الخاص بهذا الجهاز والجلسة المحددة لضمان استقلالية وتزامن الشفتات في نفس الوقت
+      const myRunningShift = list.find((s: Shift) => 
+        s.status === 'active' && 
+        (s.deviceId === currentDeviceId || s.sessionId === currentSessionId)
+      );
+
+      if (myRunningShift) {
+        setActiveShift(myRunningShift);
         try {
-          localStorage.setItem('cached_pos_active_shift', JSON.stringify(running));
+          localStorage.setItem(`cached_pos_active_shift_${currentDeviceId}`, JSON.stringify(myRunningShift));
+          localStorage.setItem('cached_pos_active_shift', JSON.stringify(myRunningShift));
         } catch (e) {}
       } else {
-        setActiveShift(prev => (prev?.status === 'active' ? prev : null));
+        setActiveShift(prev => {
+          if (prev && prev.deviceId === currentDeviceId && !list.some(s => s.id === prev.id && s.status === 'active')) {
+            try {
+              localStorage.removeItem(`cached_pos_active_shift_${currentDeviceId}`);
+              localStorage.removeItem('cached_pos_active_shift');
+            } catch (e) {}
+            return null;
+          }
+          return (prev && prev.status === 'active' && prev.deviceId === currentDeviceId) ? prev : null;
+        });
       }
     }, () => {});
 
@@ -1159,6 +1265,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const remainingAmount = Math.max(0, total - paidAmount);
     const status: InvoiceStatus = remainingAmount === 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
 
+    const rawNetProfit = total - totalCost;
+
+    // احتساب عمولة المندوب وأرباح المالك الصافية في حال تفعيل المندوب
+    let salesRepId: string | undefined = data.salesRepId;
+    let salesRepName: string | undefined = data.salesRepName;
+    let salesRepCommission = 0;
+    let storeNetProfit = rawNetProfit;
+    let showRepOnInvoice = data.showRepOnInvoice ?? true;
+
+    if (salesRepId && settings.salesReps) {
+      const rep = settings.salesReps.find(r => r.id === salesRepId);
+      if (rep) {
+        salesRepName = rep.name;
+        if (data.showRepOnInvoice !== undefined) {
+          showRepOnInvoice = data.showRepOnInvoice;
+        } else if (rep.showOnInvoice !== undefined) {
+          showRepOnInvoice = rep.showOnInvoice;
+        } else {
+          showRepOnInvoice = settings.defaultShowRepOnInvoice ?? true;
+        }
+
+        const type = rep.commissionType || settings.repCommissionDefaultType || 'percentage_profit';
+        if (type === 'percentage_sales') {
+          // نسبة من إجمالي المبيعات
+          salesRepCommission = Math.round((total * (rep.commissionRate || 0)) / 100);
+        } else {
+          // نسبة من صافي الربح
+          salesRepCommission = Math.round(Math.max(0, (rawNetProfit * (rep.commissionRate || 0)) / 100));
+        }
+        storeNetProfit = Math.max(0, rawNetProfit - salesRepCommission);
+      }
+    }
+
     const newInv: any = {
       id: newId,
       ownerUid: currentUser?.uid || '',
@@ -1180,8 +1319,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status,
       notes: data.notes || '',
       totalCost,
-      netProfit: total - totalCost,
+      netProfit: rawNetProfit,
       shiftId: activeShift ? activeShift.id : undefined,
+      salesRepId: salesRepId || undefined,
+      salesRepName: salesRepName || undefined,
+      salesRepCommission,
+      storeNetProfit,
+      showRepOnInvoice,
     };
 
     setDoc(doc(db, 'invoices', newId), sanitizeForFirestore(newInv)).catch(() => {});
@@ -1948,6 +2092,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           sessionRole === 'admin' ? 'المدير العام (أدمن)' : sessionRole === 'supervisor' ? 'المشرف' : 'الموظف (الكاشير)'
         );
 
+    const detected = detectSystemInfo();
+
     const newShift: Shift = {
       id: newId,
       shiftNumber: nextNum,
@@ -1969,6 +2115,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       itemsSold: [],
       presetShiftId: selectedPreset.id,
       presetShiftName: selectedPreset.name,
+      sessionId: currentSessionId,
+      deviceId: currentDeviceId,
+      deviceName: detected.deviceName,
+      deviceType: detected.deviceType,
       notes: notes.trim(),
       createdAt: now,
     };
@@ -1981,11 +2131,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveShift(newShift);
     setShifts(prev => [newShift, ...prev.filter(s => s.id !== newId)]);
     try {
+      localStorage.setItem(`cached_pos_active_shift_${currentDeviceId}`, JSON.stringify(newShift));
       localStorage.setItem('cached_pos_active_shift', JSON.stringify(newShift));
       localStorage.setItem('cached_pos_shifts', JSON.stringify([newShift, ...shifts]));
     } catch (e) {}
 
     setDoc(doc(db, 'shifts', newId), sanitizeForFirestore(payload), { merge: true }).catch(() => {});
+    
+    // Heartbeat update with active shift
+    setTimeout(() => {
+      sendSessionHeartbeat();
+    }, 500);
+
     return { success: true, shift: newShift };
   };
 
@@ -2026,11 +2183,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveShift(null);
     setShifts(prev => [closedShift, ...prev.filter(s => s.id !== closedShift.id)]);
     try {
+      localStorage.removeItem(`cached_pos_active_shift_${currentDeviceId}`);
       localStorage.removeItem('cached_pos_active_shift');
       localStorage.setItem('cached_pos_shifts', JSON.stringify([closedShift, ...shifts.filter(s => s.id !== closedShift.id)]));
     } catch (e) {}
 
     await setDoc(doc(db, 'shifts', closedShift.id), sanitizeForFirestore(payload), { merge: true }).catch(() => {});
+    
+    // Heartbeat update with closed shift
+    setTimeout(() => {
+      sendSessionHeartbeat();
+    }, 500);
+
     return closedShift;
   };
 
@@ -2043,8 +2207,185 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     if (activeShift?.id === shiftId) {
       setActiveShift(null);
-      try { localStorage.removeItem('cached_pos_active_shift'); } catch (e) {}
+      try { 
+        localStorage.removeItem(`cached_pos_active_shift_${currentDeviceId}`);
+        localStorage.removeItem('cached_pos_active_shift'); 
+      } catch (e) {}
     }
+  };
+
+  // جلسات الأجهزة المتصلة
+  const refreshSessions = async () => {
+    const detected = detectSystemInfo();
+    const fallbackCurrent: DeviceSession = {
+      id: currentSessionId,
+      deviceId: currentDeviceId,
+      userId: currentUser?.uid || 'local',
+      deviceName: detected.deviceName,
+      deviceType: detected.deviceType,
+      os: detected.os,
+      browser: detected.browser,
+      location: detected.location,
+      isCurrentDevice: true,
+      lastActive: new Date().toISOString(),
+      activeShiftId: activeShift?.id || null,
+      activeShiftName: activeShift?.presetShiftName || (activeShift ? `شفت #${activeShift.shiftNumber}` : null),
+      createdAt: new Date().toISOString(),
+    };
+
+    if (!currentUser?.uid) {
+      setDeviceSessions([fallbackCurrent]);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(currentUser.uid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.sessions)) {
+          const list = data.sessions.map((s: any) => ({
+            ...s,
+            isCurrentDevice: s.deviceId === currentDeviceId
+          }));
+          if (!list.some((s: any) => s.deviceId === currentDeviceId)) {
+            list.unshift(fallbackCurrent);
+          }
+          setDeviceSessions(list);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    setDeviceSessions(prev => {
+      const remaining = prev.filter(s => s.deviceId !== currentDeviceId);
+      return [fallbackCurrent, ...remaining];
+    });
+  };
+
+  // مرجع للشفت النشط لمنع إعادة تشغيل المؤقت وتجميد التطبيق عند كل عملية بيع
+  const activeShiftRef = useRef(activeShift);
+  useEffect(() => {
+    activeShiftRef.current = activeShift;
+  }, [activeShift]);
+
+  const sendSessionHeartbeat = async () => {
+    const detected = detectSystemInfo();
+    const uid = currentUser?.uid || 'local';
+    const curShift = activeShiftRef.current;
+
+    const payload = {
+      userId: uid,
+      sessionId: currentSessionId,
+      deviceId: currentDeviceId,
+      deviceName: detected.deviceName,
+      deviceType: detected.deviceType,
+      os: detected.os,
+      browser: detected.browser,
+      location: detected.location,
+      activeShiftId: curShift?.id || null,
+      activeShiftName: curShift?.presetShiftName || (curShift ? `شفت #${curShift.shiftNumber}` : null),
+    };
+
+    try {
+      const res = await fetch('/api/sessions/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.sessions)) {
+          const mapped = data.sessions.map((s: any) => ({
+            ...s,
+            isCurrentDevice: s.deviceId === currentDeviceId
+          }));
+          setDeviceSessions(prev => {
+            if (prev.length === mapped.length && prev.every((p, i) => p.id === mapped[i]?.id && p.lastActive === mapped[i]?.lastActive)) {
+              return prev;
+            }
+            return mapped;
+          });
+        }
+      }
+    } catch (e) {}
+
+    if (currentUser?.uid && navigator.onLine) {
+      try {
+        const sessDocRef = doc(db, 'user_sessions', `${currentUser.uid}_${currentDeviceId}`);
+        setDoc(sessDocRef, sanitizeForFirestore({
+          ...payload,
+          isCurrentDevice: true,
+          lastActive: new Date().toISOString(),
+        }), { merge: true }).catch(() => {});
+      } catch (e) {}
+    }
+  };
+
+  const terminateSession = async (sessionIdToTerminate: string): Promise<{ success: boolean }> => {
+    if (sessionIdToTerminate === currentSessionId) {
+      await logout();
+      return { success: true };
+    }
+
+    try {
+      if (currentUser?.uid) {
+        await fetch(`/api/sessions/${encodeURIComponent(currentUser.uid)}/${encodeURIComponent(sessionIdToTerminate)}`, {
+          method: 'DELETE'
+        });
+      }
+      setDeviceSessions(prev => prev.filter(s => s.id !== sessionIdToTerminate));
+      return { success: true };
+    } catch {
+      setDeviceSessions(prev => prev.filter(s => s.id !== sessionIdToTerminate));
+      return { success: true };
+    }
+  };
+
+  // نبضة دورية كل دقيقة لتحديث حالة الجلسة دون تجميد واجهة المستخدم
+  useEffect(() => {
+    sendSessionHeartbeat();
+    const interval = setInterval(sendSessionHeartbeat, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [currentUser?.uid, currentDeviceId, currentSessionId]);
+
+  // إدارة المواد المكررة: حساب عند الحاجة وتفادي تجميد التطبيق المستمر
+  const [duplicateGroupsCache, setDuplicateGroupsCache] = useState<DuplicateProductGroup[]>([]);
+  
+  const refreshDuplicates = useCallback((): DuplicateProductGroup[] => {
+    const groups = findDuplicateGroups(products);
+    setDuplicateGroupsCache(groups);
+    return groups;
+  }, [products]);
+
+  // تحديث المكررات تلقائياً فقط عند فتح نافذة كشف المكررات
+  useEffect(() => {
+    if (isDuplicatesModalOpen) {
+      refreshDuplicates();
+    }
+  }, [isDuplicatesModalOpen, refreshDuplicates]);
+
+  const duplicateGroups = duplicateGroupsCache;
+
+  // إدارة المندوبين
+  const addSalesRep = async (repData: Omit<SalesRep, 'id' | 'createdAt'>): Promise<SalesRep> => {
+    const newRep: SalesRep = {
+      ...repData,
+      id: 'rep_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...(settings.salesReps || []), newRep];
+    updateSettings({ salesReps: updated });
+    return newRep;
+  };
+
+  const updateSalesRep = async (id: string, updates: Partial<SalesRep>) => {
+    const updated = (settings.salesReps || []).map(r => r.id === id ? { ...r, ...updates } : r);
+    updateSettings({ salesReps: updated });
+  };
+
+  const deleteSalesRep = async (id: string) => {
+    const updated = (settings.salesReps || []).filter(r => r.id !== id);
+    updateSettings({ salesReps: updated });
   };
 
   const loginUser = async (user: any) => {
@@ -2076,7 +2417,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSessionModalOpen, setIsSessionModalOpen,
         targetSessionForModal, setTargetSessionForModal,
         targetSupervisorIdForModal, setTargetSupervisorIdForModal,
-        openSessionModal
+        openSessionModal,
+        currentDeviceId, currentSessionId, deviceSessions, refreshSessions, terminateSession,
+        isDuplicatesModalOpen, setIsDuplicatesModalOpen,
+        isActiveSessionsModalOpen, setIsActiveSessionsModalOpen,
+        duplicateGroups,
+        refreshDuplicates,
+        addSalesRep,
+        updateSalesRep,
+        deleteSalesRep,
+        theme,
+        setTheme,
+        toggleTheme
       }}
     >
       {children}

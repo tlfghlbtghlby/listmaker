@@ -6,11 +6,12 @@ import {
   Users, 
   BarChart3, 
   Settings,
+  Briefcase,
   Clock
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-export type TabType = 'pos' | 'inventory' | 'invoices' | 'customers' | 'reports' | 'shifts' | 'settings';
+export type TabType = 'pos' | 'inventory' | 'invoices' | 'customers' | 'reports' | 'sales-reps' | 'shifts' | 'settings';
 
 interface NavigationProps {
   activeTab: TabType;
@@ -18,7 +19,7 @@ interface NavigationProps {
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }) => {
-  const { products, invoices, customers, shifts, activeShift, hasPermission } = useApp();
+  const { products, invoices, customers, shifts, activeShift, hasPermission, settings, sessionRole } = useApp();
 
   const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
   const activeDebtCustomers = customers.filter((c) => c.totalDebt > 0).length;
@@ -45,6 +46,14 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
       badge: invoices.length,
       badgeColor: 'text-slate-600 bg-slate-100',
       permitted: hasPermission('canViewInvoices'),
+    },
+    {
+      id: 'sales-reps',
+      label: 'المندوبين والأرباح',
+      icon: <Briefcase className="w-4 h-4" />,
+      badge: (settings.salesReps && settings.salesReps.length > 0) ? settings.salesReps.length : undefined,
+      badgeColor: 'text-indigo-700 bg-indigo-50 font-bold',
+      permitted: !!settings.enableSalesReps && (hasPermission('canManageSalesReps') || sessionRole === 'admin' || sessionRole === 'supervisor'),
     },
     {
       id: 'shifts',

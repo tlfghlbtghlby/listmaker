@@ -91,48 +91,58 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 flex flex-col justify-center items-center p-4 selection:bg-emerald-600 selection:text-white" dir="rtl">
+    <div 
+      className="min-h-screen flex flex-col justify-center items-center p-4 selection:bg-amber-500 selection:text-slate-950" 
+      style={{
+        background: 'radial-gradient(ellipse at center, #0e1c33 0%, #080f1d 60%, #03060c 100%)',
+      }}
+      dir="rtl"
+    >
       
       <div className="w-full max-w-md my-auto space-y-4">
         
         {/* Brand & Cloud Status Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white shadow-xl shadow-emerald-900/40 mb-1 font-black text-2xl">
-            ن
+          <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-2xl p-0.5 bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-600 shadow-2xl shadow-amber-500/25 mb-1">
+            <img 
+              src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+              alt="برنامج المفكر الحسابي" 
+              className="w-full h-full object-cover rounded-[14px]"
+            />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-wide">
-            نظام إدارة المبيعات والمخزن
+          <h1 className="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-yellow-200 tracking-wide font-['Cairo']">
+            برنامج المفكر الحسابي
           </h1>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            <Cloud className="w-3.5 h-3.5" />
-            <span>نظام سحابي متاح للجميع مع مزامنة فورية</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-amber-500/30 text-amber-300 text-xs font-semibold backdrop-blur-md">
+            <Cloud className="w-3.5 h-3.5 text-amber-400" />
+            <span>المفكر سمارت • AL-MUFAKIR SMART POS</span>
           </div>
         </div>
 
         {/* Main Login Card */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xl p-6 sm:p-7 space-y-5">
+        <div className="bg-slate-900/90 backdrop-blur-md rounded-2xl border border-amber-500/20 shadow-2xl shadow-black/60 p-6 sm:p-7 space-y-5 text-slate-100">
           
-          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-600" />
-              <h2 className="text-base font-extrabold text-slate-900">تسجيل الدخول للنظام</h2>
+              <ShieldCheck className="w-5 h-5 text-amber-400" />
+              <h2 className="text-base font-extrabold text-white">تسجيل الدخول للنظام</h2>
             </div>
-            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+            <span className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 rounded-full">
               وصول مباشر
             </span>
           </div>
 
           {/* Feedback messages */}
           {logoutNotice && (
-            <div className="p-3.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-900 text-xs font-bold flex items-start gap-2.5 shadow-xs animate-in fade-in">
-              <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+            <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs font-bold flex items-start gap-2.5 shadow-xs animate-in fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
               <div className="flex-1 leading-relaxed">
                 {logoutNotice}
               </div>
               <button
                 type="button"
                 onClick={() => setLogoutNotice(null)}
-                className="text-amber-500 hover:text-amber-800 text-xs px-1 cursor-pointer"
+                className="text-amber-400 hover:text-amber-200 text-xs px-1 cursor-pointer"
                 title="إغلاق التنبيه"
               >
                 ✕
@@ -141,8 +151,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
           )}
 
           {errorMessage && (
-            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-200 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
               <span>{errorMessage}</span>
             </div>
           )}
@@ -152,7 +162,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
             
             {/* Input 1: Identifier */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
                 اسم المستخدم / البريد الإلكتروني / رقم الهاتف
               </label>
               <div className="relative">
@@ -164,14 +174,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
                   placeholder="أدخل اسم المستخدم أو البريد"
                   required
                   autoFocus
-                  className="w-full pl-3 pr-10 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                  className="w-full pl-3 pr-10 py-2.5 text-sm border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-slate-800 text-white placeholder-slate-500"
                 />
               </div>
             </div>
 
             {/* Input 2: Password */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
                 كلمة المرور
               </label>
               <div className="relative">
@@ -182,13 +192,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white text-left font-mono"
+                  className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-slate-800 text-white placeholder-slate-500 text-left font-mono"
                   dir="ltr"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
                   title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -200,16 +210,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onContinueAsGuest
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer mt-2"
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-500 hover:from-amber-500 hover:to-yellow-400 active:scale-[0.99] disabled:opacity-50 text-slate-950 font-black text-sm rounded-xl shadow-lg shadow-amber-500/25 transition flex items-center justify-center gap-2 cursor-pointer mt-2"
             >
               {isLoading ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
                   <span>جاري تسجيل الدخول والتحقق...</span>
                 </>
               ) : (
                 <>
-                  <LogIn className="w-4 h-4" />
+                  <LogIn className="w-4 h-4 text-slate-950" />
                   <span>تسجيل الدخول</span>
                 </>
               )}

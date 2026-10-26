@@ -51,13 +51,24 @@ import {
   Share2,
   Send,
   Phone,
-  Instagram
+  Instagram,
+  Monitor,
+  Smartphone,
+  Tablet,
+  Globe,
+  Cpu,
+  Copy,
+  Briefcase,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { PresetShift, StoreSupervisor } from '../types';
 import { QuickAddItemsSection } from './QuickAddItemsSection';
 import { ExportBackupModal } from './ExportBackupModal';
 import { WipeProductsModal } from './WipeProductsModal';
 import { ModernInvoiceHeader } from './ModernInvoiceHeader';
+import { DuplicateProductsModal } from './DuplicateProductsModal';
+import { ActiveSessionsModal } from './ActiveSessionsModal';
 
 // Dynamic lazy import to completely exclude AdminPanel code chunk for regular clients
 const AdminPanel = React.lazy(() => import('./AdminPanel'));
@@ -96,7 +107,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
     deletePresetShift,
     addSupervisor,
     updateSupervisor,
-    deleteSupervisor
+    deleteSupervisor,
+    currentDeviceId,
+    deviceSessions,
+    isDuplicatesModalOpen,
+    setIsDuplicatesModalOpen,
+    isActiveSessionsModalOpen,
+    setIsActiveSessionsModalOpen,
+    duplicateGroups,
+    shifts,
+    activeShift,
+    theme,
+    setTheme
   } = useApp();
 
   const [storeName, setStoreName] = useState(settings.storeName);
@@ -141,6 +163,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
   }, []);
 
   const [enableWholesale, setEnableWholesale] = useState<boolean>(settings.enableWholesale ?? true);
+  const [enableSalesReps, setEnableSalesReps] = useState<boolean>(settings.enableSalesReps ?? false);
+  const [defaultShowRepOnInvoice, setDefaultShowRepOnInvoice] = useState<boolean>(settings.defaultShowRepOnInvoice ?? true);
+  const [repCommissionDefaultType, setRepCommissionDefaultType] = useState<'percentage_profit' | 'percentage_sales'>(
+    settings.repCommissionDefaultType || 'percentage_profit'
+  );
   const [desktopLayout, setDesktopLayout] = useState<'full' | 'partial'>(settings.desktopLayout || 'full');
 
   // تخصيص وترويسة القائمة والمصطلحات (جملة/تجزئة، مفرد/قطع، عنوان التجارة)
@@ -331,6 +358,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       if (settings.directPrintEnabled !== undefined) setDirectPrintEnabled(settings.directPrintEnabled);
       if ((settings as any).selectedPrinterName !== undefined) setSelectedPrinterName((settings as any).selectedPrinterName);
       if (settings.enableWholesale !== undefined) setEnableWholesale(settings.enableWholesale);
+      if (settings.enableSalesReps !== undefined) setEnableSalesReps(settings.enableSalesReps);
+      if (settings.defaultShowRepOnInvoice !== undefined) setDefaultShowRepOnInvoice(settings.defaultShowRepOnInvoice);
+      if (settings.repCommissionDefaultType !== undefined) setRepCommissionDefaultType(settings.repCommissionDefaultType);
       if (settings.desktopLayout) setDesktopLayout(settings.desktopLayout);
       if (settings.headerRightSealText) setHeaderRightSealText(settings.headerRightSealText);
       if (settings.headerLeftSealText) setHeaderLeftSealText(settings.headerLeftSealText);
@@ -405,6 +435,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       directPrintEnabled,
       selectedPrinterName: selectedPrinterName.trim(),
       enableWholesale,
+      enableSalesReps,
+      defaultShowRepOnInvoice,
+      repCommissionDefaultType,
       desktopLayout,
       headerRightSealText: headerRightSealText.trim() || (enableWholesale ? 'جملة' : 'تجزئة'),
       headerLeftSealText: headerLeftSealText.trim() || 'مفرد',
@@ -833,6 +866,81 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
 
         <form onSubmit={handleSaveSettings} className="p-6 space-y-5">
           
+          {/* ثيم ومظهر البرنامج المتوافق مع هوية المفكر سمارت */}
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-amber-500" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  ثيم ومظهر برنامج المفكر الحسابي
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium">
+                متوافق بالكامل مع هوية وشعار البرنامج
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* الثيم الداكن */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTheme('dark');
+                  updateSettings({ theme: 'dark' });
+                }}
+                className={`p-3 rounded-xl border-2 text-right transition cursor-pointer flex items-center justify-between ${
+                  theme === 'dark'
+                    ? 'border-amber-500 bg-[#0b1728] text-white shadow-md shadow-amber-500/10'
+                    : 'border-slate-300 dark:border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+                    <Moon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>الثيم الداكن (ليلي فاخر)</span>
+                      {theme === 'dark' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      كحلي داكن مع لمسات ذهبية براقة مطابقة للشعار
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              {/* الثيم الفاتح */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTheme('light');
+                  updateSettings({ theme: 'light' });
+                }}
+                className={`p-3 rounded-xl border-2 text-right transition cursor-pointer flex items-center justify-between ${
+                  theme === 'light'
+                    ? 'border-amber-500 bg-white text-slate-900 shadow-md shadow-amber-500/10'
+                    : 'border-slate-300 dark:border-slate-700 bg-slate-100 text-slate-700 hover:border-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-600 flex items-center justify-center shrink-0 border border-sky-500/30">
+                    <Sun className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>الثيم الفاتح (نهاري مشرق)</span>
+                      {theme === 'light' && <Check className="w-3.5 h-3.5 text-amber-600" />}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      رمادي فاتح نقي مع إبراز هوية المفكر سمارت
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1052,6 +1160,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* ميزة بيع القوائم بواسطة المندوبين وتوزيع الأرباح */}
+          <div className="bg-indigo-50/50 border border-indigo-200 rounded-xl p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black shrink-0">
+                  <Briefcase className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">
+                    ميزة بيع القوائم بواسطة المندوبين وتحديد الأرباح والعمولات
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    إمكانية تفعيل أو إطفاء البيع بواسطة المندوبين، وتحديد المندوب عند إتمام القوائم، وحساب أرباح المالك وعمولات المندوبين.
+                  </p>
+                </div>
+              </div>
+
+              {/* زر التبديل تشغيل / إطفاء */}
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={enableSalesReps}
+                  onChange={(e) => setEnableSalesReps(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {enableSalesReps && (
+              <div className="pt-3 border-t border-indigo-100 space-y-3 animate-in fade-in">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  
+                  {/* الخيار الافتراضي لإظهار اسم المندوب في القوائم */}
+                  <div className="bg-white p-3 rounded-xl border border-indigo-200/80 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">إظهار اسم المندوب في القائمة المطبوعة</div>
+                      <div className="text-[10px] text-slate-500">طباعة اسم المندوب في ترويسة الفاتورة الافتراضية</div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={defaultShowRepOnInvoice}
+                        onChange={(e) => setDefaultShowRepOnInvoice(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  {/* طريقة احتساب النسبة الافتراضية */}
+                  <div className="bg-white p-3 rounded-xl border border-indigo-200/80 flex flex-col justify-between">
+                    <div className="text-xs font-bold text-slate-900 mb-1">طريقة احتساب النسبة الافتراضية للمندوب</div>
+                    <select
+                      value={repCommissionDefaultType}
+                      onChange={(e) => setRepCommissionDefaultType(e.target.value as any)}
+                      className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="percentage_profit">نسبة من صافي الربح (تقتطع من هامش الربح فقط)</option>
+                      <option value="percentage_sales">نسبة من إجمالي المبيعات (تقتطع من قيمة الفاتورة)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="bg-indigo-100/60 p-3 rounded-xl border border-indigo-200 text-xs text-indigo-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0"></span>
+                    <span>
+                      المندوبين المسجلين حالياً: <strong>{(settings.salesReps || []).length} مندوب</strong>.
+                      تستطيع إضافة وتعديل ملفاتهم وتتبع المواد المباعة لكل مندوب من تبويب <strong>"المندوبين والأرباح"</strong>.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Desktop Layout Mode */}
@@ -2398,6 +2583,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
                   </div>
                 </div>
               </button>
+              {/* 5. Duplicate Products Review & Cleaner */}
+              <button
+                type="button"
+                onClick={() => setIsDuplicatesModalOpen(true)}
+                className="p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50/30 text-right flex flex-col justify-between transition group cursor-pointer shadow-2xs"
+              >
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white transition shadow-xs">
+                    <Copy className="w-4 h-4" />
+                  </div>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                    duplicateGroups.length > 0
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {duplicateGroups.length > 0 ? `${duplicateGroups.reduce((a,c)=>a+c.duplicateItems.length,0)} مكرر مكتشف` : 'المخزن نظيف'}
+                  </span>
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-amber-950 transition">
+                    كشف ومراجعة المواد المكررة وإلغاؤها
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    فحص المواد المتطابقة في الباركود أو المتشابهة 100% بالاسم والأسعار مع خيار عرضها وحذفها أو دمج رصيدها.
+                  </div>
+                </div>
+              </button>
+
+              {/* 6. Offline Lifetime Guarantee Badge */}
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 text-right flex flex-col justify-between shadow-2xs">
+                <div className="flex items-center justify-between w-full mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-950">
+                    أوفلاين مدى الحياة • بدون إعلانات
+                  </span>
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-emerald-950">
+                    نظام أوفلاين محلي مستقل 100%
+                  </div>
+                  <div className="text-[11px] text-emerald-900 mt-1 leading-relaxed">
+                    يعمل البرنامج بدون إنترنت مدى الحياة، وجميع قواعد البيانات محفوظة مشفرة على قرص جهازك (%APPDATA%) بدون أي إعلانات أو نوافذ منبثقة.
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </>
@@ -2446,6 +2679,61 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
               <Lock className="w-3.5 h-3.5" />
               <span>تبديل الجلسة الآن</span>
             </button>
+          </div>
+
+          {/* Active Devices & Multi-Device Concurrent Shifts */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                  <Cpu className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <span>الأجهزة المتصلة والمتزامنة مع النظام</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold">
+                      {deviceSessions.length} أجهزة
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    تتبع الهواتف والكمبيوترات المتصلة، موقع كل جهاز ونوعه، وإمكانية فتح شفت مختلف في آن واحد من كل جلسة.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsActiveSessionsModalOpen(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span>إدارة ومراقبة الجلسات</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {deviceSessions.slice(0, 3).map((sess) => (
+                <div key={sess.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      {sess.deviceType === 'mobile' ? <Smartphone className="w-3.5 h-3.5 text-amber-600" /> : <Monitor className="w-3.5 h-3.5 text-indigo-600" />}
+                      {sess.deviceName}
+                    </span>
+                    {sess.deviceId === currentDeviceId && (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-black">
+                        هذا الجهاز
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    الموقع: {sess.location}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {sess.activeShiftName ? `شفت مفتوح: ${sess.activeShiftName}` : 'لا يوجد شفت مفتوح'}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Supervisor PIN and Startup Role */}
@@ -3171,6 +3459,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = 'store'
       <WipeProductsModal
         isOpen={isWipeModalOpen}
         onClose={() => setIsWipeModalOpen(false)}
+      />
+
+      {/* Duplicate Products Cleaner Modal */}
+      <DuplicateProductsModal
+        isOpen={isDuplicatesModalOpen}
+        onClose={() => setIsDuplicatesModalOpen(false)}
+      />
+
+      {/* Multi-Device Sessions Modal */}
+      <ActiveSessionsModal
+        isOpen={isActiveSessionsModalOpen}
+        onClose={() => setIsActiveSessionsModalOpen(false)}
       />
 
     </div>

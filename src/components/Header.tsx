@@ -16,10 +16,14 @@ import {
   Store,
   RefreshCw,
   CheckCircle2,
-  Lock
+  Lock,
+  Cpu,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { SessionBadgeButton } from './SessionBadgeButton';
 import { ShiftHeaderButton } from './ShiftHeaderButton';
+import { ActiveSessionsModal } from './ActiveSessionsModal';
 
 interface HeaderProps {
   onOpenSettings?: () => void;
@@ -43,7 +47,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
     syncNotice,
     setSyncNotice,
     hasPermission,
-    sessionRole
+    sessionRole,
+    deviceSessions,
+    isActiveSessionsModalOpen,
+    setIsActiveSessionsModalOpen,
+    theme,
+    toggleTheme
   } = useApp();
 
   // Metrics calculations
@@ -67,17 +76,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
           {/* Right Side: اسم المحل والشارة وحالة المزامنة */}
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-md font-black text-xl shrink-0">
-                {settings.storeName ? settings.storeName.charAt(0) : <Store className="w-5 h-5" />}
+              <div className="relative w-11 h-11 rounded-xl p-0.5 bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-600 shadow-md shadow-amber-500/20 shrink-0">
+                <img 
+                  src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+                  alt="المفكر سمارت"
+                  className="w-full h-full object-cover rounded-[10px]" 
+                />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-lg sm:text-xl font-bold text-white tracking-wide">
-                    {settings.storeName}
+                    {settings.storeName || 'برنامج المفكر الحسابي'}
                   </h1>
                   <span className="text-xs text-slate-400 hidden sm:inline">·</span>
-                  <span className="text-xs text-emerald-400 font-semibold bg-emerald-950/60 border border-emerald-800/80 px-2 py-0.5 rounded-md">
-                    نظام المبيعات والمخزن
+                  <span className="text-xs text-amber-300 font-bold bg-amber-950/70 border border-amber-600/50 px-2 py-0.5 rounded-md shadow-xs">
+                    المفكر سمارت • POS
                   </span>
                 </div>
                 {settings.ownerName && (
@@ -166,6 +179,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
             {/* Shift Start/End Live Button (زر بدء وإنهاء الشفت والمؤقت الحي) */}
             <ShiftHeaderButton />
 
+            {/* Connected Devices & Sessions Button (زر الجلسات المتصلة) */}
+            <button
+              type="button"
+              onClick={() => setIsActiveSessionsModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer shadow-xs whitespace-nowrap"
+              title="عرض الأجهزة والهواتف المتصلة ومواقعها والشفت المفتوح على كل جهاز"
+            >
+              <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="hidden sm:inline">الجلسات</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                {deviceSessions.length}
+              </span>
+            </button>
+
             {/* Device Mode Toggle */}
             <button
               type="button"
@@ -210,6 +237,30 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
                 <span>{settings.desktopLayout === 'full' ? 'الوضع الكامل الجانبي' : 'الوضع الجزئي (تبويبات)'}</span>
               </button>
             )}
+
+            {/* Theme Switcher Button (فاتح / داكن) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs whitespace-nowrap ${
+                theme === 'dark'
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                  : 'bg-sky-500/15 border-sky-400/40 text-sky-200 hover:bg-sky-500/25'
+              }`}
+              title={theme === 'dark' ? 'أنت في الثيم الداكن (انقر للتبديل إلى الفاتح)' : 'أنت في الثيم الفاتح (انقر للتبديل إلى الداكن)'}
+            >
+              {theme === 'dark' ? (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>داكن</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-yellow-300 shrink-0" />
+                  <span>فاتح</span>
+                </>
+              )}
+            </button>
 
             {/* Cloud User Account & Sync Status & Logout */}
             {currentUser ? (
@@ -324,6 +375,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenAuth }) => {
           </button>
         </div>
       )}
+
+      {/* Active Sessions Modal */}
+      <ActiveSessionsModal
+        isOpen={isActiveSessionsModalOpen}
+        onClose={() => setIsActiveSessionsModalOpen(false)}
+      />
     </header>
   );
 };

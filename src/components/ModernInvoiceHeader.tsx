@@ -9,8 +9,16 @@ interface ModernInvoiceHeaderProps {
 }
 
 // Preset Illustrations crafted for commercial retail receipts
-const PresetCenterIllustration: React.FC<{ type?: string; className?: string }> = ({ type = 'stationery', className = 'w-16 h-16' }) => {
+const PresetCenterIllustration: React.FC<{ type?: string; className?: string }> = ({ type = 'mufakir', className = 'w-16 h-16' }) => {
   switch (type) {
+    case 'mufakir':
+      return (
+        <img 
+          src="/assets/aistudio/1792973910260_3946b0af.jpg" 
+          alt="شعار المفكر الحسابي" 
+          className={`${className} object-cover rounded-xl`}
+        />
+      );
     case 'stationery':
       return (
         <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
